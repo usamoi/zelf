@@ -15,6 +15,7 @@ pub struct Args {
 fn solve<'a, T: Context>(elf: Elf<'a, T>)
 where
     <T as zelf::context::Context>::Integer: std::fmt::LowerHex,
+    <T as zelf::context::Context>::SectionFlags: std::fmt::LowerHex,
 {
     println!("ELF Header:");
     println!("  Magic:       {:?}", elf.header().ident().magic);
@@ -45,7 +46,7 @@ where
             print!("type = {:?}; ", section.header().typa());
             print!("addr = {:?}; ", section.header().addr());
             print!("align = {:#x}; ", section.header().addralign());
-            // print!("flags = {:#x}; ", section.header().flags());
+            print!("flags = {:#x}; ", section.header().flags());
             print!("info = {:#x}; ", section.header().info());
             print!("link = {:#x}; ", section.header().link());
             println!();
@@ -84,7 +85,7 @@ fn main() {
     let args = Args::parse();
     let file = args.file.expect("No ELF file is specified.");
     let bytes = std::fs::read(file).expect("Cannot open the file.");
-    let elf = zelf::elf::Elfs::parse(&bytes).expect("Failed to parse the file.");
+    let elf = zelf::elf::Elfs::parse(&bytes).unwrap();
     match elf {
         Little32(elf) => solve(elf),
         Little64(elf) => solve(elf),

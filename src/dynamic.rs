@@ -140,9 +140,9 @@ impl TryFrom<u32> for DynamicTag {
 }
 
 impl From<DynamicTag> for u32 {
-    fn from(x: DynamicTag) -> Self {
+    fn from(value: DynamicTag) -> Self {
         use DynamicTag::*;
-        match x {
+        match value {
             Null => 0,
             Needed => 1,
             PltRelSize => 2,

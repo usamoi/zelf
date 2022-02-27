@@ -11,6 +11,8 @@ pub enum ParseSectionsError {
     BadPropertyShentsize,
     BadSectionHeaders,
     BadSectionZero,
+    BadPropertyShstrndx,
+    BadPropertyShnum,
     BadArray,
 }
 
@@ -23,7 +25,7 @@ pub enum ParseSectionError {
 
 #[derive(Debug, Clone)]
 pub enum ParseShstrtabError {
-    BadPropertyShstridx,
+    BadPropertyShstrndx,
     BadSection,
     BadPropertyType,
     BadStrtab,
@@ -32,8 +34,8 @@ pub enum ParseShstrtabError {
 #[derive(Debug, Clone, Copy)]
 pub struct Sections<'a, T: Context> {
     data: &'a [u8],
-    shstrndx: u16,
     offset: usize,
+    shstrndx: u16,
     num: u16,
     _maker: PhantomData<T>,
 }
@@ -41,62 +43,64 @@ pub struct Sections<'a, T: Context> {
 impl<'a, T: Context> Sections<'a, T> {
     pub fn parse(elf: Elf<'a, T>) -> Result<Option<Sections<'a, T>>, ParseSectionsError> {
         use ParseSectionsError::*;
-        if elf.header().shentsize() as usize != core::mem::size_of::<SectionHeader<T>>() {
-            return Err(BadPropertyShentsize);
-        }
+        let data = elf.data();
         let offset = as_offset::<T>(elf.header().shoff()).ok_or(BadSectionHeaders)?;
         if offset == 0 {
             return Ok(None);
         }
-        if elf.header().shnum() as usize == 0 {
-            // todo: follow the spec
-            return Err(BadSectionHeaders);
+        if elf.header().shentsize() as usize != core::mem::size_of::<SectionHeader<T>>() {
+            return Err(BadPropertyShentsize);
         }
-        let num = elf.header().shnum();
-        read_n::<SectionHeader<T>>(elf.data(), offset, num as usize).ok_or(BadSectionHeaders)?;
-        let sections = Self {
-            data: elf.data(),
+        // section zero
+        let zero = read::<SectionHeader<T>>(data, offset).ok_or(BadSectionZero)?;
+        if zero.name() != 0 {
+            return Err(BadSectionZero);
+        }
+        if zero.checked_type() != Some(SectionType::Null) {
+            return Err(BadSectionZero);
+        }
+        if zero.flags().into() != 0u32.into() {
+            return Err(BadSectionZero);
+        }
+        if as_offset::<T>(zero.addr()).ok_or(BadSectionZero)? != 0 {
+            return Err(BadSectionZero);
+        }
+        if as_offset::<T>(zero.offset()).ok_or(BadSectionZero)? != 0 {
+            return Err(BadSectionZero);
+        }
+        let num = match (
+            elf.header().shnum(),
+            as_offset::<T>(zero.size()).ok_or(BadSectionZero)?,
+        ) {
+            (x, 0) if x < *SECTION_INDEX_RESERVE.start() => x,
+            (0, x) if x as u16 >= *SECTION_INDEX_RESERVE.start() => x as u16,
+            _ => return Err(BadPropertyShnum),
+        };
+        let shstrndx = match (elf.header().shstrndx(), zero.link()) {
+            (x, 0) if x < *SECTION_INDEX_RESERVE.start() => x,
+            (SECTION_INDEX_XINDEX, x) if x as u16 >= *SECTION_INDEX_RESERVE.start() => x as u16,
+            _ => return Err(BadPropertyShstrndx),
+        };
+        if zero.info() != 0 {
+            return Err(BadSectionZero);
+        }
+        if as_offset::<T>(zero.addralign()).ok_or(BadSectionZero)? != 0 {
+            return Err(BadSectionZero);
+        }
+        if as_offset::<T>(zero.entsize()).ok_or(BadSectionZero)? != 0 {
+            return Err(BadSectionZero);
+        }
+        read_n::<SectionHeader<T>>(data, offset, num as usize).ok_or(BadSectionHeaders)?;
+        Ok(Some(Self {
+            data,
             offset,
-            shstrndx: elf.header().shstrndx(),
+            shstrndx,
             num,
             _maker: PhantomData,
-        };
-        // section zero
-        let zero: Section<T> = Section::parse(sections, 0)
-            .unwrap()
-            .map_err(|_| BadSectionZero)?;
-        if zero.header().name() != 0 {
-            return Err(BadSectionZero);
-        }
-        if zero.header().typa() != SectionType::Null {
-            return Err(BadSectionZero);
-        }
-        if zero.header().flags().into() != 0u32.into() {
-            return Err(BadSectionZero);
-        }
-        if as_offset::<T>(zero.header().addr()).ok_or(BadSectionZero)? != 0 {
-            return Err(BadSectionZero);
-        }
-        if as_offset::<T>(zero.header().offset()).ok_or(BadSectionZero)? != 0 {
-            return Err(BadSectionZero);
-        }
-        let zero_size = as_offset::<T>(zero.header().size()).ok_or(BadSectionZero)?;
-        if zero_size != 0 && zero_size != elf.header().shnum() as usize {
-            return Err(BadSectionZero);
-        }
-        if zero.header().link() != 0 && zero.header().link() != elf.header().shstrndx() as u32 {
-            return Err(BadSectionZero);
-        }
-        if zero.header().info() != 0 {
-            return Err(BadSectionZero);
-        }
-        if as_offset::<T>(zero.header().addralign()).ok_or(BadSectionZero)? != 0 {
-            return Err(BadSectionZero);
-        }
-        if as_offset::<T>(zero.header().entsize()).ok_or(BadSectionZero)? != 0 {
-            return Err(BadSectionZero);
-        }
-        Ok(Some(sections))
+        }))
+    }
+    pub fn shstrndx(&self) -> u16 {
+        self.shstrndx
     }
     pub fn num(&self) -> u16 {
         self.num
@@ -171,7 +175,7 @@ impl<'a> Shstrtab<'a> {
             x => x,
         };
         let section = Section::parse(sections, shstrndx)
-            .ok_or(BadPropertyShstridx)?
+            .ok_or(BadPropertyShstrndx)?
             .map_err(|_| BadSection)?;
         if section.header().typa() != SectionType::Strtab {
             return Err(BadPropertyType);

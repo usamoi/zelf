@@ -16,6 +16,8 @@ pub enum ParseProgramError {
     BadHeader,
     BadPropertyType,
     BadContent,
+    BadPhdr,
+    BadTls,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -29,17 +31,18 @@ pub struct Programs<'a, T: Context> {
 impl<'a, T: Context> Programs<'a, T> {
     pub fn parse(elf: Elf<'a, T>) -> Result<Option<Programs<'a, T>>, ParseProgramsError> {
         use ParseProgramsError::*;
-        if elf.header().phentsize() as usize != core::mem::size_of::<ProgramHeader<T>>() {
-            return Err(BadPropertyPhentsize);
-        }
+        let data = elf.data();
         let offset = as_offset::<T>(elf.header().phoff()).ok_or(BadProgramHeaders)?;
         if offset == 0 {
             return Ok(None);
         }
+        if elf.header().phentsize() as usize != core::mem::size_of::<ProgramHeader<T>>() {
+            return Err(BadPropertyPhentsize);
+        }
         let num = elf.header().phnum();
-        read_n::<ProgramHeader<T>>(elf.data(), offset, num as usize).ok_or(BadProgramHeaders)?;
+        read_n::<ProgramHeader<T>>(data, offset, num as usize).ok_or(BadProgramHeaders)?;
         Ok(Some(Self {
-            data: elf.data(),
+            data,
             offset,
             num,
             _maker: PhantomData,
@@ -69,35 +72,35 @@ impl<'a, T: Context> Program<'a, T> {
         ) -> Result<Program<'a, T>, ParseProgramError> {
             let pheader: &'a ProgramHeader<T> = read(programs.data, offset).ok_or(BadHeader)?;
             let typa = pheader.checked_type().ok_or(BadPropertyType)?;
-            match typa {
-                Null => Ok(Program {
+            if let Null = typa {
+                return Ok(Program {
                     pheader,
                     content: &[],
-                }),
+                });
+            }
+            let content_offset = as_offset::<T>(pheader.offset()).ok_or(BadContent)?;
+            let content_size = as_offset::<T>(pheader.filesz()).ok_or(BadContent)?;
+            let content =
+                read_n::<u8>(programs.data, content_offset, content_size).ok_or(BadContent)?;
+            match typa {
                 Phdr => {
-                    let content_offset = as_offset::<T>(pheader.offset()).ok_or(BadContent)?;
-                    let content_size = as_offset::<T>(pheader.filesz()).ok_or(BadContent)?;
                     if content_offset != programs.offset {
-                        return Err(BadContent);
+                        return Err(BadPhdr);
                     }
                     if content_size
-                        != programs.num as usize * core::mem::size_of::<ProgramHeader<T>>()
+                        != programs.num() as usize * core::mem::size_of::<ProgramHeader<T>>()
                     {
-                        return Err(BadContent);
+                        return Err(BadPhdr);
                     }
-                    Ok(Program {
-                        pheader,
-                        content: &[],
-                    })
                 }
-                _ => {
-                    let content_offset = as_offset::<T>(pheader.offset()).ok_or(BadContent)?;
-                    let content_size = as_offset::<T>(pheader.filesz()).ok_or(BadContent)?;
-                    let content = read_n::<u8>(programs.data, content_offset, content_size)
-                        .ok_or(BadContent)?;
-                    Ok(Program { pheader, content })
+                Tls => {
+                    if pheader.flags() != ProgramFlags::READ {
+                        return Err(BadTls);
+                    }
                 }
+                _ => (),
             }
+            Ok(Program { pheader, content })
         }
         Some(helper(programs, offset))
     }

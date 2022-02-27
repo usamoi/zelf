@@ -1,14 +1,25 @@
-//! Zelf
+//! Zelf is a zero-allocation ELF parser designed for the "no_std" environment.
 //!
-//! Zelf is a zero-allocation ELF parser in the "no_std" environment.
+//! It defines ELF C structs and provides parsing functions and parsed Rust types.
+//! Fields in ELF C structs are byte arrays so that all structs are of alignment one to escape misaligned reading (it causes faults on some hardware).
 //!
-//! Details:
+//! "context::Context" is a trait for parsing context, uniquely identified by class (32/64 bit), data encoding (little/big), version (current is 1) given by the identification in the elf header.
+//! It determines the layout of ELF structs (e.g. "ProgramHeader", "ArrayEntry") and the parsed Rust types (e.g. "Context::Integer", "Context::SectionFlags", "Context::DynamicFlags").
+//! There are four combinations of them, which are four phantom types "Little32", "Little64", "Big32", "Big64".
 //!
-//! * Integers in the input structs are byte arrays so that all structs are of alignment one, and there will be no misaligned reading (it causes faults on some hardware).
-//! * "context::Context" is a trait for parsing context, uniquely identified by class (32 / 64 bit), data encoding (little/big), version (current is 1) given by the identification in the elf header.
-//!   It defines the layout of input structs (e.g. "ProgramHeader") and the output types (e.g. "context::Integer", "context::SectionFlags", "context::DynamicFlags").
-//!   There are four combinations of them, which are four phantom types "Little32", "Little64", "Big32", "Big64".
-//! * You can read "examples/readelf" for a starter with this crate.
+//! You need to call the corresponding parsing functions for sections and programs. There is a table for reference.
+//!
+//! | Section/Program Type                                  | parsing function |
+//! |-------------------------------------------------------|------------------|
+//! | Null, Probits, Nobits, Shlib, Load, Phdr, Tls         | N/A              |
+//! | Symtab, Dynsym                                        | Symtab::parse    |
+//! | Strtab, Rela, Hash, Dynamic, Note, Rel, Group, Interp | {type}::parse    |
+//! | InitArray, FiniArray, PreinitArray                    | Array::parse     |
+//! | SymtabShndx                                           | Shndx::parse     |
+//!
+//! You need to call "Compression::parse" for compressed sections.
+//!
+//! You can read "examples/readelf" for a starter with this crate.
 
 #![no_std]
 
@@ -16,6 +27,7 @@
 extern crate derive_more;
 
 pub mod array;
+pub mod compression;
 pub mod context;
 pub mod dynamic;
 pub mod elf;
@@ -28,6 +40,7 @@ pub mod program;
 pub mod rel;
 pub mod rela;
 pub mod section;
+pub mod shndx;
 pub mod strtab;
 pub mod symtab;
 
@@ -57,8 +70,8 @@ impl TryFrom<u8> for Class {
 }
 
 impl From<Class> for u8 {
-    fn from(x: Class) -> Self {
-        x as u8
+    fn from(value: Class) -> Self {
+        value as u8
     }
 }
 
@@ -86,8 +99,8 @@ impl TryFrom<u8> for Data {
 }
 
 impl From<Data> for u8 {
-    fn from(x: Data) -> Self {
-        x as u8
+    fn from(value: Data) -> Self {
+        value as u8
     }
 }
 
@@ -112,7 +125,7 @@ impl TryFrom<u8> for Version {
 }
 
 impl From<Version> for u8 {
-    fn from(x: Version) -> Self {
-        x as u8
+    fn from(value: Version) -> Self {
+        value as u8
     }
 }
