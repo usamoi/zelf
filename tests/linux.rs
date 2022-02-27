@@ -1,37 +1,36 @@
 use std::error::Error;
+use zelf::ident::Ident;
 
-#[path = "../examples/readelf.rs"]
-mod readelf;
+#[path = "../utils/show.rs"]
+mod show;
 
-pub fn print(file: &str) -> Result<(), Box<dyn Error>> {
+pub fn show(file: &str) -> Result<(), Box<dyn Error>> {
     use zelf::elf::Elfs::{self, *};
-    use zelf::elf::ParseElfsError::*;
     use zelf::ident::ParseIdentError::*;
     let bytes = std::fs::read(file)?;
+    match Ident::parse(&bytes) {
+        Err(BadHeader | BadPropertyMagic) => return Ok(()),
+        _ => (),
+    }
     println!("File Name: {}", file);
-    let elf = match Elfs::parse(&bytes) {
-        Ok(x) => x,
-        Err(BadIdent(BadPropertyMagic)) => return Ok(()),
-        Err(e) => panic!("{e:?}"),
-    };
-    match elf {
-        Little32(elf) => readelf::display(elf),
-        Little64(elf) => readelf::display(elf),
-        Big32(elf) => readelf::display(elf),
-        Big64(elf) => readelf::display(elf),
+    match Elfs::parse(&bytes).unwrap() {
+        Little32(elf) => show::show(elf),
+        Little64(elf) => show::show(elf),
+        Big32(elf) => show::show(elf),
+        Big64(elf) => show::show(elf),
     }
     Ok(())
 }
 
 #[test]
 fn linux() {
-    let dir = std::fs::read_dir("/usr/bin").unwrap();
-    for each in dir.into_iter() {
+    let usr_lib = std::fs::read_dir("/usr/lib").unwrap().into_iter();
+    let usr_bin = std::fs::read_dir("/usr/bin").unwrap().into_iter();
+    for each in usr_lib.chain(usr_bin) {
         let each = each.unwrap();
         if !each.file_type().unwrap().is_file() {
             continue;
         }
-        if let Err(_) = print(format!("/usr/bin/{}", each.file_name().to_str().unwrap()).as_str()) {
-        }
+        if let Err(_) = show(format!("/usr/bin/{}", each.file_name().to_str().unwrap()).as_str()) {}
     }
 }
