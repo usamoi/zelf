@@ -1,6 +1,6 @@
 use crate::context::PropU32;
 use crate::context::*;
-use crate::utils::{align, read, read_n, Pod};
+use crate::utils::{align, read, read_n, terminate, Pod};
 use core::marker::PhantomData;
 
 #[derive(Debug, Clone)]
@@ -8,7 +8,6 @@ pub enum ParseNoteError {
     BadHeader,
     BadName,
     BadDescriptor,
-    BadString,
 }
 
 /// Note section/program.
@@ -26,16 +25,14 @@ impl<'a> Note<'a> {
         let mut offset = 0usize;
         let header: &NoteHeader<T> = read(content, offset).ok_or(BadHeader)?;
         offset += core::mem::size_of::<NoteHeader<T>>();
-        let name: &[u8] = read_n(content, offset, header.name_size() as usize).ok_or(BadName)?;
+        let name: &[u8] =
+            terminate(read_n(content, offset, header.name_size() as usize).ok_or(BadName)?)
+                .ok_or(BadName)?;
         offset += header.name_size() as usize;
         offset = align(offset, core::mem::align_of::<T::Integer>());
         let descriptor = read_n::<u8>(content, offset, header.descriptor_size() as usize)
             .ok_or(BadDescriptor)?;
         offset += header.descriptor_size() as usize;
-        // seems no need to check if it's ending
-        if name.iter().any(|c| *c == 0) {
-            return Err(BadString);
-        }
         Ok(Self {
             typa: header.typa(),
             name,

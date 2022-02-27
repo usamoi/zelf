@@ -1,3 +1,5 @@
+use crate::utils::terminate;
+
 #[derive(Debug, Clone)]
 pub enum ParseStrtabError {
     BadString,
@@ -20,11 +22,7 @@ impl<'a> Strtab<'a> {
         if name >= self.strings.len() {
             return None;
         }
-        let mut pointer = name;
-        while self.strings[pointer] != 0 {
-            pointer += 1;
-        }
-        Some(&self.strings[name..pointer])
+        terminate(&self.strings[name..])
     }
     pub fn iter(&self) -> impl Iterator<Item = &'a [u8]> {
         enum Iter<'a> {

@@ -1,4 +1,4 @@
-use crate::dynamic::{DynamicFlags32, DynamicFlags64};
+use crate::dynamic::{DynamicFlags32, DynamicFlags64, DynamicTag32, DynamicTag64};
 use crate::section::{SectionFlags32, SectionFlags64};
 use crate::utils::{Interpret, SealedContext};
 use crate::{Class, Data, Version};
@@ -25,6 +25,8 @@ where
     type Integer: Copy + Debug + Ord + From<u32> + Into<u64>;
 
     type SectionFlags: Copy + Debug + From<Self::Integer> + Into<Self::Integer>;
+
+    type DynamicTag: Copy + Debug + From<Self::Integer> + Into<Self::Integer>;
 
     type DynamicFlags: Copy + Debug + From<Self::Integer> + Into<Self::Integer>;
 }
@@ -87,6 +89,8 @@ macro_rules! impl_context {
 
             type SectionFlags = SectionFlags32;
 
+            type DynamicTag = DynamicTag32;
+
             type DynamicFlags = DynamicFlags32;
         }
 
@@ -126,6 +130,8 @@ macro_rules! impl_context {
             type Integer = u64;
 
             type SectionFlags = SectionFlags64;
+
+            type DynamicTag = DynamicTag64;
 
             type DynamicFlags = DynamicFlags64;
         }

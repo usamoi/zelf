@@ -1,10 +1,9 @@
 use crate::context::*;
-use crate::utils::{as_offset, read_s, Pod};
+use crate::utils::{read_s, Pod};
 
 #[derive(Debug, Clone)]
 pub enum ParseDynamicError {
     BadArray,
-    BadPropertyTag,
 }
 
 /// Dynamic section/program.
@@ -17,9 +16,6 @@ impl<'a, T: Context> Dynamic<'a, T> {
     pub fn parse(content: &'a [u8]) -> Result<Self, ParseDynamicError> {
         use ParseDynamicError::*;
         let entries: &[DynamicEntry<T>] = read_s(content).ok_or(BadArray)?;
-        for entry in entries {
-            let _tag = entry.checked_tag().ok_or(BadPropertyTag)?;
-        }
         Ok(Self { entries })
     }
     pub fn entries(&self) -> &'a [DynamicEntry<T>] {
@@ -35,15 +31,8 @@ pub struct DynamicEntry<T: Context> {
 }
 
 impl<T: Context> DynamicEntry<T> {
-    pub fn checked_tag(&self) -> Option<DynamicTag> {
-        let value = as_offset::<T>(T::interpret(self.tag))?;
-        TryInto::<u32>::try_into(value).ok()?.try_into().ok()
-    }
-    /// # Panics
-    ///
-    /// Panics if it's an invaild value.
-    pub fn tag(&self) -> DynamicTag {
-        self.checked_tag().unwrap()
+    pub fn tag(&self) -> T::DynamicTag {
+        From::<T::Integer>::from(T::interpret(self.tag))
     }
     pub fn un(&self) -> T::Integer {
         T::interpret(self.un)
@@ -53,7 +42,7 @@ impl<T: Context> DynamicEntry<T> {
 unsafe impl<T: Context> Pod for DynamicEntry<T> {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum DynamicTag {
+pub enum DynamicTag32 {
     Null,
     Needed,
     PltRelSize,
@@ -90,58 +79,57 @@ pub enum DynamicTag {
     SymtabShndx,
     OsSpecific(u32),
     ProcessorSpecific(u32),
+    NonStandard(u32),
 }
 
-impl TryFrom<u32> for DynamicTag {
-    type Error = ();
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        use DynamicTag::*;
+impl From<u32> for DynamicTag32 {
+    fn from(value: u32) -> Self {
+        use DynamicTag32::*;
         match value {
-            0 => Ok(Null),
-            1 => Ok(Needed),
-            2 => Ok(PltRelSize),
-            3 => Ok(PltGot),
-            4 => Ok(Hash),
-            5 => Ok(Strtab),
-            6 => Ok(Symtab),
-            7 => Ok(Rela),
-            8 => Ok(RelaSize),
-            9 => Ok(RelaEnt),
-            10 => Ok(StrSize),
-            11 => Ok(SymEnt),
-            12 => Ok(Init),
-            13 => Ok(Fini),
-            14 => Ok(SoName),
-            15 => Ok(RPath),
-            16 => Ok(Symbolic),
-            17 => Ok(Rel),
-            18 => Ok(RelSize),
-            19 => Ok(RelEnt),
-            20 => Ok(PltRel),
-            21 => Ok(Debug),
-            22 => Ok(TextRel),
-            23 => Ok(JmpRel),
-            24 => Ok(BindNow),
-            25 => Ok(InitArray),
-            26 => Ok(FiniArray),
-            27 => Ok(InitArraySize),
-            28 => Ok(FiniArraySize),
-            29 => Ok(RunPath),
-            30 => Ok(Flags),
-            32 => Ok(PreInitArray),
-            33 => Ok(PreInitArraySize),
-            34 => Ok(SymtabShndx),
-            x @ 0x6000000D..=0x6FFFF000 => Ok(OsSpecific(x)),
-            x @ 0x70000000..=0x7FFFFFFF => Ok(ProcessorSpecific(x)),
-            _ => Err(()),
+            0 => Null,
+            1 => Needed,
+            2 => PltRelSize,
+            3 => PltGot,
+            4 => Hash,
+            5 => Strtab,
+            6 => Symtab,
+            7 => Rela,
+            8 => RelaSize,
+            9 => RelaEnt,
+            10 => StrSize,
+            11 => SymEnt,
+            12 => Init,
+            13 => Fini,
+            14 => SoName,
+            15 => RPath,
+            16 => Symbolic,
+            17 => Rel,
+            18 => RelSize,
+            19 => RelEnt,
+            20 => PltRel,
+            21 => Debug,
+            22 => TextRel,
+            23 => JmpRel,
+            24 => BindNow,
+            25 => InitArray,
+            26 => FiniArray,
+            27 => InitArraySize,
+            28 => FiniArraySize,
+            29 => RunPath,
+            30 => Flags,
+            32 => PreInitArray,
+            33 => PreInitArraySize,
+            34 => SymtabShndx,
+            x @ 0x6000000D..=0x6FFFF000 => OsSpecific(x),
+            x @ 0x70000000..=0x7FFFFFFF => ProcessorSpecific(x),
+            x => NonStandard(x),
         }
     }
 }
 
-impl From<DynamicTag> for u32 {
-    fn from(value: DynamicTag) -> Self {
-        use DynamicTag::*;
+impl From<DynamicTag32> for u32 {
+    fn from(value: DynamicTag32) -> Self {
+        use DynamicTag32::*;
         match value {
             Null => 0,
             Needed => 1,
@@ -179,6 +167,138 @@ impl From<DynamicTag> for u32 {
             SymtabShndx => 34,
             OsSpecific(x) => x,
             ProcessorSpecific(x) => x,
+            NonStandard(x) => x,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DynamicTag64 {
+    Null,
+    Needed,
+    PltRelSize,
+    PltGot,
+    Hash,
+    Strtab,
+    Symtab,
+    Rela,
+    RelaSize,
+    RelaEnt,
+    StrSize,
+    SymEnt,
+    Init,
+    Fini,
+    SoName,
+    RPath,
+    Symbolic,
+    Rel,
+    RelSize,
+    RelEnt,
+    PltRel,
+    Debug,
+    TextRel,
+    JmpRel,
+    BindNow,
+    InitArray,
+    FiniArray,
+    InitArraySize,
+    FiniArraySize,
+    RunPath,
+    Flags,
+    PreInitArray,
+    PreInitArraySize,
+    SymtabShndx,
+    OsSpecific(u64),
+    ProcessorSpecific(u64),
+    NonStandard(u64),
+}
+
+impl From<u64> for DynamicTag64 {
+    fn from(value: u64) -> Self {
+        use DynamicTag64::*;
+        match value {
+            0 => Null,
+            1 => Needed,
+            2 => PltRelSize,
+            3 => PltGot,
+            4 => Hash,
+            5 => Strtab,
+            6 => Symtab,
+            7 => Rela,
+            8 => RelaSize,
+            9 => RelaEnt,
+            10 => StrSize,
+            11 => SymEnt,
+            12 => Init,
+            13 => Fini,
+            14 => SoName,
+            15 => RPath,
+            16 => Symbolic,
+            17 => Rel,
+            18 => RelSize,
+            19 => RelEnt,
+            20 => PltRel,
+            21 => Debug,
+            22 => TextRel,
+            23 => JmpRel,
+            24 => BindNow,
+            25 => InitArray,
+            26 => FiniArray,
+            27 => InitArraySize,
+            28 => FiniArraySize,
+            29 => RunPath,
+            30 => Flags,
+            32 => PreInitArray,
+            33 => PreInitArraySize,
+            34 => SymtabShndx,
+            x @ 0x6000000D..=0x6FFFF000 => OsSpecific(x),
+            x @ 0x70000000..=0x7FFFFFFF => ProcessorSpecific(x),
+            x => NonStandard(x),
+        }
+    }
+}
+
+impl From<DynamicTag64> for u64 {
+    fn from(value: DynamicTag64) -> Self {
+        use DynamicTag64::*;
+        match value {
+            Null => 0,
+            Needed => 1,
+            PltRelSize => 2,
+            PltGot => 3,
+            Hash => 4,
+            Strtab => 5,
+            Symtab => 6,
+            Rela => 7,
+            RelaSize => 8,
+            RelaEnt => 9,
+            StrSize => 10,
+            SymEnt => 11,
+            Init => 12,
+            Fini => 13,
+            SoName => 14,
+            RPath => 15,
+            Symbolic => 16,
+            Rel => 17,
+            RelSize => 18,
+            RelEnt => 19,
+            PltRel => 20,
+            Debug => 21,
+            TextRel => 22,
+            JmpRel => 23,
+            BindNow => 24,
+            InitArray => 25,
+            FiniArray => 26,
+            InitArraySize => 27,
+            FiniArraySize => 28,
+            RunPath => 29,
+            Flags => 30,
+            PreInitArray => 32,
+            PreInitArraySize => 33,
+            SymtabShndx => 34,
+            OsSpecific(x) => x,
+            ProcessorSpecific(x) => x,
+            NonStandard(x) => x,
         }
     }
 }

@@ -8,7 +8,6 @@ pub enum ParseHashError {
     BadHeader,
     BadBuckets,
     BadChains,
-    BadTermination,
 }
 
 /// Hash section.
@@ -19,6 +18,7 @@ pub struct Hash<'a, T: Context> {
 }
 
 impl<'a, T: Context> Hash<'a, T> {
+    #[allow(unused_assignments)]
     pub fn parse(content: &'a [u8]) -> Result<Self, ParseHashError> {
         use ParseHashError::*;
         let mut offset = 0usize;
@@ -28,10 +28,7 @@ impl<'a, T: Context> Hash<'a, T> {
         offset += core::mem::size_of::<HashBucketEntry<T>>() * header.nbuckets() as usize;
         let chains: &[HashChainEntry<T>] =
             read_n(content, offset, header.nchains() as usize).ok_or(BadChains)?;
-        offset += core::mem::size_of::<HashChainEntry<T>>() * header.nbuckets() as usize;
-        if offset != content.len() {
-            return Err(BadTermination);
-        }
+        offset += core::mem::size_of::<HashChainEntry<T>>() * header.nchains() as usize;
         Ok(Self { buckets, chains })
     }
     pub fn buckets(&self) -> &'a [HashBucketEntry<T>] {

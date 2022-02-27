@@ -60,3 +60,12 @@ pub fn align(offset: usize, align: usize) -> usize {
     assert!(align.is_power_of_two());
     (offset.wrapping_sub(1) | align.wrapping_sub(1)).wrapping_add(1)
 }
+
+pub fn terminate(s: &[u8]) -> Option<&[u8]> {
+    for (i, c) in s.iter().enumerate() {
+        if *c == 0 {
+            return Some(&s[..i]);
+        }
+    }
+    None
+}

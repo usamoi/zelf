@@ -12,7 +12,7 @@ pub struct Args {
     file: Option<String>,
 }
 
-fn solve<'a, T: Context>(elf: Elf<'a, T>)
+pub fn display<'a, T: Context>(elf: Elf<'a, T>)
 where
     <T as zelf::context::Context>::Integer: std::fmt::LowerHex,
     <T as zelf::context::Context>::SectionFlags: std::fmt::LowerHex,
@@ -33,6 +33,7 @@ where
         let shstrtab = Shstrtab::parse(sections).unwrap().unwrap();
         println!("Section Headers:");
         for i in 0..sections.num() {
+            use zelf::section::SectionType::*;
             let section = Section::parse(sections, i).unwrap().unwrap();
             let name = shstrtab
                 .strtab()
@@ -44,12 +45,45 @@ where
             print!("[{}] ", i);
             print!("name = {}; ", name);
             print!("type = {:?}; ", section.header().typa());
-            print!("addr = {:?}; ", section.header().addr());
+            print!("addr = {:#x}; ", section.header().addr());
             print!("align = {:#x}; ", section.header().addralign());
             print!("flags = {:#x}; ", section.header().flags());
             print!("info = {:#x}; ", section.header().info());
             print!("link = {:#x}; ", section.header().link());
             println!();
+            match section.header().typa() {
+                Symtab | Dynsym => {
+                    zelf::symtab::Symtab::<T>::parse(section.content()).unwrap();
+                }
+                Strtab => {
+                    zelf::strtab::Strtab::parse(section.content()).unwrap();
+                }
+                Rela => {
+                    zelf::rela::Rela::<T>::parse(section.content()).unwrap();
+                }
+                Hash => {
+                    zelf::hash::Hash::<T>::parse(section.content()).unwrap();
+                }
+                Dynamic => {
+                    zelf::dynamic::Dynamic::<T>::parse(section.content()).unwrap();
+                }
+                Note => {
+                    zelf::note::Note::parse::<T>(section.content()).unwrap();
+                }
+                Rel => {
+                    zelf::rel::Rel::<T>::parse(section.content()).unwrap();
+                }
+                InitArray | FiniArray | PreinitArray => {
+                    zelf::array::Array::<T>::parse(section.content()).unwrap();
+                }
+                Group => {
+                    zelf::group::Group::<T>::parse(section.content()).unwrap();
+                }
+                SymtabShndx => {
+                    zelf::shndx::Shndx::<T>::parse(section.content()).unwrap();
+                }
+                _ => (),
+            }
         }
     }
     if let Some(programs) = Programs::parse(elf).unwrap() {
@@ -74,22 +108,33 @@ where
                     let path = core::str::from_utf8(interp.path()).unwrap();
                     println!("requesting program interpeter: {}", path);
                 }
+                Dynamic => {
+                    zelf::dynamic::Dynamic::<T>::parse(program.content()).unwrap();
+                }
+                Note => {
+                    zelf::note::Note::parse::<T>(program.content()).unwrap();
+                }
                 _ => (),
             }
         }
     }
 }
 
-fn main() {
+fn print(file: &str) {
     use zelf::elf::Elfs::*;
-    let args = Args::parse();
-    let file = args.file.expect("No ELF file is specified.");
     let bytes = std::fs::read(file).expect("Cannot open the file.");
     let elf = zelf::elf::Elfs::parse(&bytes).unwrap();
     match elf {
-        Little32(elf) => solve(elf),
-        Little64(elf) => solve(elf),
-        Big32(elf) => solve(elf),
-        Big64(elf) => solve(elf),
+        Little32(elf) => display(elf),
+        Little64(elf) => display(elf),
+        Big32(elf) => display(elf),
+        Big64(elf) => display(elf),
     }
+}
+
+#[allow(unused)]
+fn main() {
+    let args = Args::parse();
+    let file = args.file.expect("No ELF file is specified.");
+    print(file.as_str());
 }
