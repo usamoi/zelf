@@ -24,7 +24,6 @@ pub mod hash;
 pub mod ident;
 pub mod interp;
 pub mod note;
-pub mod phdr;
 pub mod program;
 pub mod rel;
 pub mod rela;

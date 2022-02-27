@@ -74,6 +74,22 @@ impl<'a, T: Context> Program<'a, T> {
                     pheader,
                     content: &[],
                 }),
+                Phdr => {
+                    let content_offset = as_offset::<T>(pheader.offset()).ok_or(BadContent)?;
+                    let content_size = as_offset::<T>(pheader.filesz()).ok_or(BadContent)?;
+                    if content_offset != programs.offset {
+                        return Err(BadContent);
+                    }
+                    if content_size
+                        != programs.num as usize * core::mem::size_of::<ProgramHeader<T>>()
+                    {
+                        return Err(BadContent);
+                    }
+                    Ok(Program {
+                        pheader,
+                        content: &[],
+                    })
+                }
                 _ => {
                     let content_offset = as_offset::<T>(pheader.offset()).ok_or(BadContent)?;
                     let content_size = as_offset::<T>(pheader.filesz()).ok_or(BadContent)?;
