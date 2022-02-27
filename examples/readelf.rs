@@ -1,7 +1,10 @@
 extern crate zelf;
 
 use clap::Parser;
-use zelf::{elf::Elf, interpret::Interpreter};
+use zelf::context::Context;
+use zelf::elf::Elf;
+use zelf::program::{Program, Programs};
+use zelf::section::{Section, Sections, Shstrtab};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
@@ -9,9 +12,9 @@ pub struct Args {
     file: Option<String>,
 }
 
-fn solve<'a, T: Interpreter>(elf: Elf<'a, T>)
+fn solve<'a, T: Context>(elf: Elf<'a, T>)
 where
-    <T as zelf::interpret::Interpreter>::Integer: std::fmt::LowerHex,
+    <T as zelf::context::Context>::Integer: std::fmt::LowerHex,
 {
     println!("ELF Header:");
     println!("  Magic:       {:?}", elf.header().ident().magic);
@@ -25,22 +28,20 @@ where
     println!("  Object file Verison:  {:#x}", elf.header().version());
     println!("  Object file Machine:  {:#x}", elf.header().machine());
     println!("  Object file Entry:    {:#x}", elf.header().entry());
-    if let Some(sections) = elf.sections() {
+    if let Some(sections) = Sections::parse(elf).unwrap() {
+        let shstrtab = Shstrtab::parse(sections).unwrap().unwrap();
         println!("Section Headers:");
-        for (i, result) in sections.iter().enumerate() {
-            let section = result.unwrap();
-            let name = elf.shstrtab().map(|strtab| {
-                strtab
-                    .find(section.header().name() as usize)
-                    .map(core::str::from_utf8)
-                    .unwrap_or(Ok("<LOST>"))
-                    .unwrap_or("<INVAILD>")
-            });
+        for i in 0..sections.num() {
+            let section = Section::parse(sections, i).unwrap().unwrap();
+            let name = shstrtab
+                .strtab()
+                .find(section.header().name() as usize)
+                .map(core::str::from_utf8)
+                .unwrap_or(Ok("<LOST>"))
+                .unwrap_or("<INVAILD>");
             print!("  ");
             print!("[{}] ", i);
-            if let Some(name) = name {
-                print!("name = {}; ", name);
-            }
+            print!("name = {}; ", name);
             print!("type = {:?}; ", section.header().typa());
             print!("addr = {:?}; ", section.header().addr());
             print!("align = {:#x}; ", section.header().addralign());
@@ -50,11 +51,11 @@ where
             println!();
         }
     }
-    if let Some(programs) = elf.programs() {
+    if let Some(programs) = Programs::parse(elf).unwrap() {
         println!("Program Headers:");
-        for (i, result) in programs.iter().enumerate() {
+        for i in 0..programs.num() {
             use zelf::program::ProgramType::*;
-            let program = result.unwrap();
+            let program = Program::parse(programs, i).unwrap().unwrap();
             print!("  ");
             print!("[{}] ", i);
             print!("type = {:?}; ", program.header().typa());

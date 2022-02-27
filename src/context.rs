@@ -1,12 +1,18 @@
 use crate::dynamic::{DynamicFlags32, DynamicFlags64};
 use crate::section::{SectionFlags32, SectionFlags64};
-use crate::utils::{Interpret, SealedInterpreter};
-use crate::{Class, Data, Integer, Version, U16, U32, U64};
+use crate::utils::{Interpret, SealedContext};
+use crate::{Class, Data, Version};
 use core::fmt::Debug;
 
-pub trait Interpreter: Copy + SealedInterpreter + 'static
+pub type PropU16 = [u8; 2];
+
+pub type PropU32 = [u8; 4];
+
+pub type PropU64 = [u8; 8];
+
+pub trait Context: Copy + SealedContext + 'static
 where
-    Self: Interpret<Self::Usize, Target = Self::Integer>,
+    Self: Interpret<Self::PropUsize, Target = Self::Integer>,
     Self: Interpret<(Self::PropU32If32, Self::PropU32If64), Target = u32>,
     Self: Interpret<(Self::PropUsizeIf32, Self::PropUsizeIf64), Target = Self::Integer>,
 {
@@ -18,14 +24,14 @@ where
 
     type Integer: Copy + Debug + Ord + From<u32> + Into<u64>;
 
-    type SectionFlags: Copy + Debug + From<Integer<Self>> + Into<Integer<Self>>;
+    type SectionFlags: Copy + Debug + From<Self::Integer> + Into<Self::Integer>;
 
-    type DynamicFlags: Copy + Debug + From<Integer<Self>> + Into<Integer<Self>>;
+    type DynamicFlags: Copy + Debug + From<Self::Integer> + Into<Self::Integer>;
 }
 
-impl<T: Interpreter> Interpret<U16> for T {
+impl<T: Context> Interpret<PropU16> for T {
     type Target = u16;
-    fn interpret(x: U16) -> u16 {
+    fn interpret(x: PropU16) -> u16 {
         use Data::*;
         match T::DATA {
             Little => u16::from_le_bytes(x),
@@ -34,9 +40,9 @@ impl<T: Interpreter> Interpret<U16> for T {
     }
 }
 
-impl<T: Interpreter> Interpret<U32> for T {
+impl<T: Context> Interpret<PropU32> for T {
     type Target = u32;
-    fn interpret(x: U32) -> u32 {
+    fn interpret(x: PropU32) -> u32 {
         use Data::*;
         match T::DATA {
             Little => u32::from_le_bytes(x),
@@ -45,9 +51,9 @@ impl<T: Interpreter> Interpret<U32> for T {
     }
 }
 
-impl<T: Interpreter> Interpret<U64> for T {
+impl<T: Context> Interpret<PropU64> for T {
     type Target = u64;
-    fn interpret(x: U64) -> u64 {
+    fn interpret(x: PropU64) -> u64 {
         use Data::*;
         match T::DATA {
             Little => u64::from_le_bytes(x),
@@ -56,21 +62,21 @@ impl<T: Interpreter> Interpret<U64> for T {
     }
 }
 
-macro_rules! impl_interpeter {
+macro_rules! impl_context {
     ($t: ty, Class32, $data: ident, $version: ident) => {
-        impl SealedInterpreter for $t {
-            type Usize = U32;
+        impl SealedContext for $t {
+            type PropUsize = PropU32;
 
-            type PropU32If32 = U32;
+            type PropU32If32 = PropU32;
 
             type PropU32If64 = ();
 
-            type PropUsizeIf32 = U32;
+            type PropUsizeIf32 = PropU32;
 
             type PropUsizeIf64 = ();
         }
 
-        impl Interpreter for $t {
+        impl Context for $t {
             const CLASS: Class = Class::Class32;
 
             const DATA: Data = Data::$data;
@@ -98,19 +104,19 @@ macro_rules! impl_interpeter {
         }
     };
     ($t: ty, Class64, $data: ident, $version: ident) => {
-        impl SealedInterpreter for $t {
-            type Usize = U64;
+        impl SealedContext for $t {
+            type PropUsize = PropU64;
 
             type PropU32If32 = ();
 
-            type PropU32If64 = U32;
+            type PropU32If64 = PropU32;
 
             type PropUsizeIf32 = ();
 
-            type PropUsizeIf64 = U64;
+            type PropUsizeIf64 = PropU64;
         }
 
-        impl Interpreter for $t {
+        impl Context for $t {
             const CLASS: Class = Class::Class64;
 
             const DATA: Data = Data::$data;
@@ -141,22 +147,22 @@ macro_rules! impl_interpeter {
 #[derive(Debug, Clone, Copy)]
 pub enum Little32 {}
 
-impl_interpeter!(Little32, Class32, Little, One);
+impl_context!(Little32, Class32, Little, One);
 
 /// Little endian, 64 bit, version 1.
 #[derive(Debug, Clone, Copy)]
 pub enum Little64 {}
 
-impl_interpeter!(Little64, Class64, Little, One);
+impl_context!(Little64, Class64, Little, One);
 
 /// Big endian, 32 bit, version 1.
 #[derive(Debug, Clone, Copy)]
 pub enum Big32 {}
 
-impl_interpeter!(Big32, Class32, Big, One);
+impl_context!(Big32, Class32, Big, One);
 
 /// Big endian, 64 bit, version 1.
 #[derive(Debug, Clone, Copy)]
 pub enum Big64 {}
 
-impl_interpeter!(Big64, Class64, Big, One);
+impl_context!(Big64, Class64, Big, One);

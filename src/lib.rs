@@ -1,16 +1,28 @@
+//! Zelf
+//!
+//! Zelf is a zero-allocation ELF parser in the "no_std" environment.
+//!
+//! Details:
+//!
+//! * Integers in the input structs are byte arrays so that all structs are of alignment one, and there will be no misaligned reading (it causes faults on some hardware).
+//! * "context::Context" is a trait for parsing context, uniquely identified by class (32 / 64 bit), data encoding (little/big), version (current is 1) given by the identification in the elf header.
+//!   It defines the layout of input structs (e.g. "ProgramHeader") and the output types (e.g. "context::Integer", "context::SectionFlags", "context::DynamicFlags").
+//!   There are four combinations of them, which are four phantom types "Little32", "Little64", "Big32", "Big64".
+//! * You can read "examples/readelf" for a starter with this crate.
+
 #![no_std]
 
 #[macro_use]
 extern crate derive_more;
 
 pub mod array;
+pub mod context;
 pub mod dynamic;
 pub mod elf;
 pub mod group;
 pub mod hash;
 pub mod ident;
 pub mod interp;
-pub mod interpret;
 pub mod note;
 pub mod phdr;
 pub mod program;
@@ -21,21 +33,6 @@ pub mod strtab;
 pub mod symtab;
 
 mod utils;
-
-/// ELF u16.
-pub type U16 = [u8; 2];
-
-/// ELF u32.
-pub type U32 = [u8; 4];
-
-/// ELF u64.
-pub type U64 = [u8; 8];
-
-/// ELF usize.
-pub(crate) type Usize<T> = <T as utils::SealedInterpreter>::Usize;
-
-/// ELF pointer-sized integer.
-pub type Integer<T> = <T as interpret::Interpreter>::Integer;
 
 /// ELF class.
 #[repr(u8)]
@@ -119,12 +116,4 @@ impl From<Version> for u8 {
     fn from(x: Version) -> Self {
         x as u8
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum ParseError {
-    BrokenHeader,
-    BrokenBody,
-    BadProperty,
-    BadString,
 }

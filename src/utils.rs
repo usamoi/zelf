@@ -1,11 +1,8 @@
-use crate::interpret::Interpreter;
-use crate::{Integer, ParseError};
+use crate::context::Context;
 use core::fmt::Debug;
 
-pub trait SealedInterpreter {
-    type Usize: Debug + Copy;
-
-    // todo: use GAT to replace these four types.
+pub trait SealedContext {
+    type PropUsize: Debug + Copy;
 
     type PropU32If32: Debug + Copy;
 
@@ -21,7 +18,7 @@ pub trait Interpret<T> {
     fn interpret(x: T) -> Self::Target;
 }
 
-pub fn as_offset<T: Interpreter>(x: Integer<T>) -> Option<usize> {
+pub fn as_offset<T: Context>(x: T::Integer) -> Option<usize> {
     let y: u64 = x.into();
     y.try_into().ok()
 }
@@ -62,13 +59,4 @@ pub fn read_s<T: Pod>(data: &[u8]) -> Option<&[T]> {
 pub fn align(offset: usize, align: usize) -> usize {
     assert!(align.is_power_of_two());
     (offset.wrapping_sub(1) | align.wrapping_sub(1)).wrapping_add(1)
-}
-
-pub fn check_string(x: &[u8]) -> Result<(), ParseError> {
-    use ParseError::*;
-    if x.iter().any(|c| *c == 0) {
-        Err(BadString)
-    } else {
-        Ok(())
-    }
 }

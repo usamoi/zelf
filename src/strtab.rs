@@ -1,13 +1,16 @@
-use crate::ParseError;
-
 #[derive(Debug, Clone)]
+pub enum ParseStrtabError {
+    BadString,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct Strtab<'a> {
     strings: &'a [u8],
 }
 
 impl<'a> Strtab<'a> {
-    pub fn parse(content: &'a [u8]) -> Result<Self, ParseError> {
-        use ParseError::*;
+    pub fn parse(content: &'a [u8]) -> Result<Self, ParseStrtabError> {
+        use ParseStrtabError::*;
         match content {
             [.., 0] | [] => Ok(Self { strings: content }),
             [.., _] => Err(BadString),

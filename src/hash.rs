@@ -1,28 +1,36 @@
-use crate::interpret::*;
+use crate::context::PropU32;
+use crate::context::*;
 use crate::utils::{read, read_n, Pod};
-use crate::{ParseError, U32};
 use core::marker::PhantomData;
 
-/// Hash section.
 #[derive(Debug, Clone)]
-pub struct Hash<'a, T: Interpreter> {
+pub enum ParseHashError {
+    BadHeader,
+    BadBuckets,
+    BadChains,
+    BadTermination,
+}
+
+/// Hash section.
+#[derive(Debug, Clone, Copy)]
+pub struct Hash<'a, T: Context> {
     buckets: &'a [HashBucketEntry<T>],
     chains: &'a [HashChainEntry<T>],
 }
 
-impl<'a, T: Interpreter> Hash<'a, T> {
-    pub fn parse(content: &'a [u8]) -> Result<Self, ParseError> {
-        use ParseError::*;
+impl<'a, T: Context> Hash<'a, T> {
+    pub fn parse(content: &'a [u8]) -> Result<Self, ParseHashError> {
+        use ParseHashError::*;
         let mut offset = 0usize;
-        let header: &HashHeader<T> = read(content, offset).ok_or(BrokenHeader)?;
+        let header: &HashHeader<T> = read(content, offset).ok_or(BadHeader)?;
         let buckets: &[HashBucketEntry<T>] =
-            read_n(content, offset, header.nbuckets() as usize).ok_or(BrokenBody)?;
+            read_n(content, offset, header.nbuckets() as usize).ok_or(BadBuckets)?;
         offset += core::mem::size_of::<HashBucketEntry<T>>() * header.nbuckets() as usize;
         let chains: &[HashChainEntry<T>] =
-            read_n(content, offset, header.nchains() as usize).ok_or(BrokenBody)?;
+            read_n(content, offset, header.nchains() as usize).ok_or(BadChains)?;
         offset += core::mem::size_of::<HashChainEntry<T>>() * header.nbuckets() as usize;
         if offset != content.len() {
-            return Err(BrokenBody);
+            return Err(BadTermination);
         }
         Ok(Self { buckets, chains })
     }
@@ -36,13 +44,13 @@ impl<'a, T: Interpreter> Hash<'a, T> {
 
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct HashHeader<T: Interpreter> {
-    pub nbuckets: U32,
-    pub nchains: U32,
+pub struct HashHeader<T: Context> {
+    pub nbuckets: PropU32,
+    pub nchains: PropU32,
     pub _maker: PhantomData<T>,
 }
 
-impl<T: Interpreter> HashHeader<T> {
+impl<T: Context> HashHeader<T> {
     pub fn nbuckets(&self) -> u32 {
         T::interpret(self.nbuckets)
     }
@@ -51,37 +59,37 @@ impl<T: Interpreter> HashHeader<T> {
     }
 }
 
-unsafe impl<T: Interpreter> Pod for HashHeader<T> {}
+unsafe impl<T: Context> Pod for HashHeader<T> {}
 
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct HashBucketEntry<T: Interpreter> {
-    pub value: U32,
+pub struct HashBucketEntry<T: Context> {
+    pub value: PropU32,
     pub _maker: PhantomData<T>,
 }
 
-impl<T: Interpreter> HashBucketEntry<T> {
+impl<T: Context> HashBucketEntry<T> {
     pub fn value(&self) -> u32 {
         T::interpret(self.value)
     }
 }
 
-unsafe impl<T: Interpreter> Pod for HashBucketEntry<T> {}
+unsafe impl<T: Context> Pod for HashBucketEntry<T> {}
 
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct HashChainEntry<T: Interpreter> {
-    pub value: U32,
+pub struct HashChainEntry<T: Context> {
+    pub value: PropU32,
     pub _maker: PhantomData<T>,
 }
 
-impl<T: Interpreter> HashChainEntry<T> {
+impl<T: Context> HashChainEntry<T> {
     pub fn value(&self) -> u32 {
         T::interpret(self.value)
     }
 }
 
-unsafe impl<T: Interpreter> Pod for HashChainEntry<T> {}
+unsafe impl<T: Context> Pod for HashChainEntry<T> {}
 
 /// ELF hash function.
 #[allow(arithmetic_overflow)]

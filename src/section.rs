@@ -1,132 +1,152 @@
-use crate::elf::ElfHeader;
-use crate::interpret::*;
+use crate::context::PropU32;
+use crate::context::*;
+use crate::elf::Elf;
+use crate::strtab::Strtab;
 use crate::utils::{as_offset, read, read_n, Pod};
-use crate::{Integer, ParseError, Usize, U32};
 use core::marker::PhantomData;
 use core::ops::RangeInclusive;
 
 #[derive(Debug, Clone)]
-pub struct Sections<'a, T: Interpreter> {
+pub enum ParseSectionsError {
+    BadPropertyShentsize,
+    BadSectionHeaders,
+    BadSectionZero,
+    BadArray,
+}
+
+#[derive(Debug, Clone)]
+pub enum ParseSectionError {
+    BadHeader,
+    BadPropertyType,
+    BadContent,
+}
+
+#[derive(Debug, Clone)]
+pub enum ParseShstrtabError {
+    BadPropertyShstridx,
+    BadSection,
+    BadPropertyType,
+    BadStrtab,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Sections<'a, T: Context> {
     data: &'a [u8],
+    shstrndx: u16,
     offset: usize,
-    len: usize,
+    num: u16,
     _maker: PhantomData<T>,
 }
 
-impl<'a, T: Interpreter> Sections<'a, T> {
-    pub(crate) fn parse(
-        data: &'a [u8],
-        eheader: &'a ElfHeader<T>,
-    ) -> Result<Option<Sections<'a, T>>, ParseError> {
-        use ParseError::*;
-        let offset = as_offset::<T>(eheader.shoff()).ok_or(BadProperty)?;
+impl<'a, T: Context> Sections<'a, T> {
+    pub fn parse(elf: Elf<'a, T>) -> Result<Option<Sections<'a, T>>, ParseSectionsError> {
+        use ParseSectionsError::*;
+        if elf.header().shentsize() as usize != core::mem::size_of::<SectionHeader<T>>() {
+            return Err(BadPropertyShentsize);
+        }
+        let offset = as_offset::<T>(elf.header().shoff()).ok_or(BadSectionHeaders)?;
         if offset == 0 {
             return Ok(None);
         }
-        if eheader.shnum() as usize == 0 {
+        if elf.header().shnum() as usize == 0 {
             // todo: follow the spec
-            return Err(BadProperty);
+            return Err(BadSectionHeaders);
         }
-        if eheader.shentsize() as usize != core::mem::size_of::<SectionHeader<T>>() {
-            return Err(BadProperty);
-        }
-        let len = eheader.shnum() as usize;
-        read_n::<SectionHeader<T>>(data, offset, len).ok_or(BadProperty)?;
-        // section zero
-        let z: Section<T> = Section::parse(data, offset).map_err(|_| BadProperty)?;
-        if z.header().name() != 0 {
-            return Err(BadProperty);
-        }
-        if z.header().typa() != SectionType::Null {
-            return Err(BadProperty);
-        }
-        if z.header().flags().into() != 0u32.into() {
-            return Err(BadProperty);
-        }
-        if as_offset::<T>(z.header().addr()).ok_or(BadProperty)? != 0 {
-            return Err(BadProperty);
-        }
-        if as_offset::<T>(z.header().offset()).ok_or(BadProperty)? != 0 {
-            return Err(BadProperty);
-        }
-        let z_size = as_offset::<T>(z.header().size()).ok_or(BadProperty)?;
-        if z_size != 0 && z_size != eheader.shnum() as usize {
-            return Err(BadProperty);
-        }
-        if z.header().link() != 0 && z.header().link() != eheader.shstrndx() as u32 {
-            return Err(BadProperty);
-        }
-        if z.header().info() != 0 {
-            return Err(BadProperty);
-        }
-        if as_offset::<T>(z.header().addralign()).ok_or(BadProperty)? != 0 {
-            return Err(BadProperty);
-        }
-        if as_offset::<T>(z.header().entsize()).ok_or(BadProperty)? != 0 {
-            return Err(BadProperty);
-        }
-        Ok(Some(Self {
-            data,
+        let num = elf.header().shnum();
+        read_n::<SectionHeader<T>>(elf.data(), offset, num as usize).ok_or(BadSectionHeaders)?;
+        let sections = Self {
+            data: elf.data(),
             offset,
-            len,
+            shstrndx: elf.header().shstrndx(),
+            num,
             _maker: PhantomData,
-        }))
-    }
-    pub fn len(&self) -> usize {
-        self.len
-    }
-    pub fn get(&self, index: usize) -> Option<Result<Section<'a, T>, ParseError>> {
-        if index >= self.len {
-            return None;
+        };
+        // section zero
+        let zero: Section<T> = Section::parse(sections, 0)
+            .unwrap()
+            .map_err(|_| BadSectionZero)?;
+        if zero.header().name() != 0 {
+            return Err(BadSectionZero);
         }
-        let offset = self.offset + index * core::mem::size_of::<SectionHeader<T>>();
-        Some(Section::parse(self.data, offset))
+        if zero.header().typa() != SectionType::Null {
+            return Err(BadSectionZero);
+        }
+        if zero.header().flags().into() != 0u32.into() {
+            return Err(BadSectionZero);
+        }
+        if as_offset::<T>(zero.header().addr()).ok_or(BadSectionZero)? != 0 {
+            return Err(BadSectionZero);
+        }
+        if as_offset::<T>(zero.header().offset()).ok_or(BadSectionZero)? != 0 {
+            return Err(BadSectionZero);
+        }
+        let zero_size = as_offset::<T>(zero.header().size()).ok_or(BadSectionZero)?;
+        if zero_size != 0 && zero_size != elf.header().shnum() as usize {
+            return Err(BadSectionZero);
+        }
+        if zero.header().link() != 0 && zero.header().link() != elf.header().shstrndx() as u32 {
+            return Err(BadSectionZero);
+        }
+        if zero.header().info() != 0 {
+            return Err(BadSectionZero);
+        }
+        if as_offset::<T>(zero.header().addralign()).ok_or(BadSectionZero)? != 0 {
+            return Err(BadSectionZero);
+        }
+        if as_offset::<T>(zero.header().entsize()).ok_or(BadSectionZero)? != 0 {
+            return Err(BadSectionZero);
+        }
+        Ok(Some(sections))
     }
-    pub fn iter(&self) -> impl Iterator<Item = Result<Section<'a, T>, ParseError>> + 'a {
-        let data = self.data;
-        let offset = self.offset;
-        let len = self.len;
-        let mut index = 0usize;
-        core::iter::from_fn(move || {
-            if index >= len {
-                return None;
-            }
-            let offset = offset + index * core::mem::size_of::<SectionHeader<T>>();
-            let ans = Section::parse(data, offset);
-            index += 1;
-            Some(ans)
-        })
+    pub fn num(&self) -> u16 {
+        self.num
     }
 }
 
-pub struct Section<'a, T: Interpreter> {
+#[derive(Debug, Clone, Copy)]
+pub struct Section<'a, T: Context> {
     sheader: &'a SectionHeader<T>,
     content: &'a [u8],
 }
 
-impl<'a, T: Interpreter> Section<'a, T> {
-    pub(crate) fn parse(data: &'a [u8], offset: usize) -> Result<Self, ParseError> {
-        use ParseError::*;
+impl<'a, T: Context> Section<'a, T> {
+    pub fn parse(
+        sections: Sections<'a, T>,
+        index: u16,
+    ) -> Option<Result<Section<'a, T>, ParseSectionError>> {
+        use ParseSectionError::*;
         use SectionType::*;
-        let sheader: &'a SectionHeader<T> = read(data, offset).ok_or(BrokenHeader)?;
-        let typa = SectionType::try_from(T::interpret(sheader.typa)).map_err(|_| BadProperty)?;
-        match typa {
-            Null => Ok(Section {
-                sheader,
-                content: &[],
-            }),
-            Nobits => {
-                let content_offset = as_offset::<T>(sheader.offset()).ok_or(BrokenBody)?;
-                let content = read_n::<u8>(data, content_offset, 0).ok_or(BrokenBody)?;
-                Ok(Section { sheader, content })
-            }
-            _ => {
-                let content_offset = as_offset::<T>(sheader.offset()).ok_or(BrokenBody)?;
-                let content_size = as_offset::<T>(sheader.size()).ok_or(BrokenBody)?;
-                let content = read_n::<u8>(data, content_offset, content_size).ok_or(BrokenBody)?;
-                Ok(Section { sheader, content })
+        if index >= sections.num() {
+            return None;
+        }
+        let offset = sections.offset + index as usize * core::mem::size_of::<SectionHeader<T>>();
+        fn helper<'a, T: Context>(
+            data: &'a [u8],
+            offset: usize,
+        ) -> Result<Section<'a, T>, ParseSectionError> {
+            let sheader: &'a SectionHeader<T> = read(data, offset).ok_or(BadHeader)?;
+            let typa =
+                SectionType::try_from(T::interpret(sheader.typa)).map_err(|_| BadPropertyType)?;
+            match typa {
+                Null => Ok(Section {
+                    sheader,
+                    content: &[],
+                }),
+                Nobits => {
+                    let content_offset = as_offset::<T>(sheader.offset()).ok_or(BadContent)?;
+                    let content = read_n::<u8>(data, content_offset, 0).ok_or(BadContent)?;
+                    Ok(Section { sheader, content })
+                }
+                _ => {
+                    let content_offset = as_offset::<T>(sheader.offset()).ok_or(BadContent)?;
+                    let content_size = as_offset::<T>(sheader.size()).ok_or(BadContent)?;
+                    let content =
+                        read_n::<u8>(data, content_offset, content_size).ok_or(BadContent)?;
+                    Ok(Section { sheader, content })
+                }
             }
         }
+        Some(helper(sections.data, offset))
     }
     pub fn header(&self) -> &'a SectionHeader<T> {
         self.sheader
@@ -136,22 +156,50 @@ impl<'a, T: Interpreter> Section<'a, T> {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Clone)]
-pub struct SectionHeader<T: Interpreter> {
-    pub name: U32,
-    pub typa: U32,
-    pub flags: Usize<T>,
-    pub addr: Usize<T>,
-    pub offset: Usize<T>,
-    pub size: Usize<T>,
-    pub link: U32,
-    pub info: U32,
-    pub addralign: Usize<T>,
-    pub entsize: Usize<T>,
+#[derive(Debug, Clone, Copy)]
+pub struct Shstrtab<'a> {
+    strtab: Strtab<'a>,
 }
 
-impl<T: Interpreter> SectionHeader<T> {
+impl<'a> Shstrtab<'a> {
+    pub fn parse<T: Context>(
+        sections: Sections<'a, T>,
+    ) -> Result<Option<Shstrtab<'a>>, ParseShstrtabError> {
+        use ParseShstrtabError::*;
+        let shstrndx = match sections.shstrndx {
+            SECTION_INDEX_UNDEF => return Ok(None),
+            x => x,
+        };
+        let section = Section::parse(sections, shstrndx)
+            .ok_or(BadPropertyShstridx)?
+            .map_err(|_| BadSection)?;
+        if section.header().typa() != SectionType::Strtab {
+            return Err(BadPropertyType);
+        }
+        let shstrtab = Strtab::parse(section.content()).map_err(|_| BadStrtab)?;
+        Ok(Some(Self { strtab: shstrtab }))
+    }
+    pub fn strtab(&self) -> Strtab<'a> {
+        self.strtab
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct SectionHeader<T: Context> {
+    pub name: PropU32,
+    pub typa: PropU32,
+    pub flags: T::PropUsize,
+    pub addr: T::PropUsize,
+    pub offset: T::PropUsize,
+    pub size: T::PropUsize,
+    pub link: PropU32,
+    pub info: PropU32,
+    pub addralign: T::PropUsize,
+    pub entsize: T::PropUsize,
+}
+
+impl<T: Context> SectionHeader<T> {
     pub fn name(&self) -> u32 {
         T::interpret(self.name)
     }
@@ -165,15 +213,15 @@ impl<T: Interpreter> SectionHeader<T> {
         self.checked_type().unwrap()
     }
     pub fn flags(&self) -> T::SectionFlags {
-        From::<Integer<T>>::from(T::interpret(self.flags))
+        From::<T::Integer>::from(T::interpret(self.flags))
     }
-    pub fn addr(&self) -> Integer<T> {
+    pub fn addr(&self) -> T::Integer {
         T::interpret(self.addr)
     }
-    pub fn offset(&self) -> Integer<T> {
+    pub fn offset(&self) -> T::Integer {
         T::interpret(self.offset)
     }
-    pub fn size(&self) -> Integer<T> {
+    pub fn size(&self) -> T::Integer {
         T::interpret(self.size)
     }
     pub fn link(&self) -> u32 {
@@ -182,15 +230,15 @@ impl<T: Interpreter> SectionHeader<T> {
     pub fn info(&self) -> u32 {
         T::interpret(self.info)
     }
-    pub fn addralign(&self) -> Integer<T> {
+    pub fn addralign(&self) -> T::Integer {
         T::interpret(self.addralign)
     }
-    pub fn entsize(&self) -> Integer<T> {
+    pub fn entsize(&self) -> T::Integer {
         T::interpret(self.entsize)
     }
 }
 
-unsafe impl<T: Interpreter> Pod for SectionHeader<T> {}
+unsafe impl<T: Context> Pod for SectionHeader<T> {}
 
 /// Undefined value.
 pub const SECTION_INDEX_UNDEF: u16 = 0;

@@ -1,22 +1,28 @@
-use crate::interpret::*;
+use crate::context::PropU32;
+use crate::context::*;
 use crate::utils::*;
-use crate::{ParseError, U32};
 use core::marker::PhantomData;
 
-/// Group section.
 #[derive(Debug, Clone)]
-pub struct Group<'a, T: Interpreter> {
+pub enum ParseGroupError {
+    BadHeader,
+    BadArray,
+}
+
+/// Group section.
+#[derive(Debug, Clone, Copy)]
+pub struct Group<'a, T: Context> {
     header: &'a GroupHeader<T>,
     entries: &'a [GroupEntry<T>],
 }
 
-impl<'a, T: Interpreter> Group<'a, T> {
-    pub fn parse(content: &'a [u8]) -> Result<Self, ParseError> {
-        use ParseError::*;
+impl<'a, T: Context> Group<'a, T> {
+    pub fn parse(content: &'a [u8]) -> Result<Self, ParseGroupError> {
+        use ParseGroupError::*;
         let mut offset = 0usize;
-        let header = read(content, offset).ok_or(BrokenHeader)?;
+        let header = read(content, offset).ok_or(BadHeader)?;
         offset += core::mem::size_of::<GroupHeader<T>>();
-        let entries = read_s::<GroupEntry<T>>(&content[offset..]).ok_or(BrokenBody)?;
+        let entries = read_s::<GroupEntry<T>>(&content[offset..]).ok_or(BadArray)?;
         Ok(Self { header, entries })
     }
     pub fn header(&self) -> &'a GroupHeader<T> {
@@ -29,33 +35,33 @@ impl<'a, T: Interpreter> Group<'a, T> {
 
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct GroupHeader<T: Interpreter> {
-    pub flags: U32,
+pub struct GroupHeader<T: Context> {
+    pub flags: PropU32,
     pub _maker: PhantomData<T>,
 }
 
-impl<T: Interpreter> GroupHeader<T> {
+impl<T: Context> GroupHeader<T> {
     pub fn flags(&self) -> u32 {
         T::interpret(self.flags)
     }
 }
 
-unsafe impl<T: Interpreter> Pod for GroupHeader<T> {}
+unsafe impl<T: Context> Pod for GroupHeader<T> {}
 
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct GroupEntry<T: Interpreter> {
-    pub index: U32,
+pub struct GroupEntry<T: Context> {
+    pub index: PropU32,
     pub _maker: PhantomData<T>,
 }
 
-impl<T: Interpreter> GroupEntry<T> {
+impl<T: Context> GroupEntry<T> {
     pub fn index(&self) -> u32 {
         T::interpret(self.index)
     }
 }
 
-unsafe impl<T: Interpreter> Pod for GroupEntry<T> {}
+unsafe impl<T: Context> Pod for GroupEntry<T> {}
 
 #[derive(Debug, Clone, Copy, From, Into, BitAnd, BitOr, BitXor, LowerHex)]
 pub struct GroupFlags(pub u32);

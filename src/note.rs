@@ -1,10 +1,18 @@
-use crate::utils::{align, check_string, read, read_n, Pod};
-use crate::{interpret::*, Integer};
-use crate::{ParseError, U32};
+use crate::context::PropU32;
+use crate::context::*;
+use crate::utils::{align, read, read_n, Pod};
 use core::marker::PhantomData;
 
-/// Note section/program.
 #[derive(Debug, Clone)]
+pub enum ParseNoteError {
+    BadHeader,
+    BadName,
+    BadDescriptor,
+    BadString,
+}
+
+/// Note section/program.
+#[derive(Debug, Clone, Copy)]
 pub struct Note<'a> {
     typa: u32,
     name: &'a [u8],
@@ -13,19 +21,21 @@ pub struct Note<'a> {
 
 impl<'a> Note<'a> {
     #[allow(unused_assignments)]
-    pub fn parse<T: Interpreter>(content: &'a [u8]) -> Result<Self, ParseError> {
-        use ParseError::*;
+    pub fn parse<T: Context>(content: &'a [u8]) -> Result<Self, ParseNoteError> {
+        use ParseNoteError::*;
         let mut offset = 0usize;
-        let header: &NoteHeader<T> = read(content, offset).ok_or(BrokenHeader)?;
+        let header: &NoteHeader<T> = read(content, offset).ok_or(BadHeader)?;
         offset += core::mem::size_of::<NoteHeader<T>>();
-        let name: &[u8] = read_n(content, offset, header.name_size() as usize).ok_or(BrokenBody)?;
+        let name: &[u8] = read_n(content, offset, header.name_size() as usize).ok_or(BadName)?;
         offset += header.name_size() as usize;
-        offset = align(offset, core::mem::align_of::<Integer<T>>());
-        let descriptor =
-            read_n::<u8>(content, offset, header.descriptor_size() as usize).ok_or(BrokenBody)?;
+        offset = align(offset, core::mem::align_of::<T::Integer>());
+        let descriptor = read_n::<u8>(content, offset, header.descriptor_size() as usize)
+            .ok_or(BadDescriptor)?;
         offset += header.descriptor_size() as usize;
         // seems no need to check if it's ending
-        check_string(name)?;
+        if name.iter().any(|c| *c == 0) {
+            return Err(BadString);
+        }
         Ok(Self {
             typa: header.typa(),
             name,
@@ -45,14 +55,14 @@ impl<'a> Note<'a> {
 
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct NoteHeader<T: Interpreter> {
-    pub name_size: U32,
-    pub descriptor_size: U32,
-    pub typa: U32,
+pub struct NoteHeader<T: Context> {
+    pub name_size: PropU32,
+    pub descriptor_size: PropU32,
+    pub typa: PropU32,
     pub _maker: PhantomData<T>,
 }
 
-impl<T: Interpreter> NoteHeader<T> {
+impl<T: Context> NoteHeader<T> {
     pub fn name_size(&self) -> u32 {
         T::interpret(self.name_size)
     }
@@ -64,4 +74,4 @@ impl<T: Interpreter> NoteHeader<T> {
     }
 }
 
-unsafe impl<T: Interpreter> Pod for NoteHeader<T> {}
+unsafe impl<T: Context> Pod for NoteHeader<T> {}

@@ -1,89 +1,89 @@
-use crate::elf::ElfHeader;
-use crate::interpret::*;
+use crate::context::PropU32;
+use crate::context::*;
+use crate::elf::Elf;
 use crate::utils::{as_offset, read, read_n, Pod};
-use crate::{Integer, ParseError, Usize, U32};
 use core::marker::PhantomData;
 
 #[derive(Debug, Clone)]
-pub struct Programs<'a, T: Interpreter> {
+pub enum ParseProgramsError {
+    BadPropertyPhentsize,
+    BadProgramHeaders,
+    BadArray,
+}
+
+#[derive(Debug, Clone)]
+pub enum ParseProgramError {
+    BadHeader,
+    BadPropertyType,
+    BadContent,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Programs<'a, T: Context> {
     data: &'a [u8],
     offset: usize,
-    len: usize,
+    num: u16,
     _maker: PhantomData<T>,
 }
 
-impl<'a, T: Interpreter> Programs<'a, T> {
-    pub(crate) fn parse(
-        data: &'a [u8],
-        eheader: &'a ElfHeader<T>,
-    ) -> Result<Option<Programs<'a, T>>, ParseError> {
-        use ParseError::*;
-        let offset = as_offset::<T>(eheader.phoff()).ok_or(BadProperty)?;
+impl<'a, T: Context> Programs<'a, T> {
+    pub fn parse(elf: Elf<'a, T>) -> Result<Option<Programs<'a, T>>, ParseProgramsError> {
+        use ParseProgramsError::*;
+        if elf.header().phentsize() as usize != core::mem::size_of::<ProgramHeader<T>>() {
+            return Err(BadPropertyPhentsize);
+        }
+        let offset = as_offset::<T>(elf.header().phoff()).ok_or(BadProgramHeaders)?;
         if offset == 0 {
             return Ok(None);
         }
-        if eheader.phentsize() as usize != core::mem::size_of::<ProgramHeader<T>>() {
-            return Err(BadProperty);
-        }
-        let len = eheader.phnum() as usize;
-        read_n::<ProgramHeader<T>>(data, offset, len).ok_or(BadProperty)?;
+        let num = elf.header().phnum();
+        read_n::<ProgramHeader<T>>(elf.data(), offset, num as usize).ok_or(BadProgramHeaders)?;
         Ok(Some(Self {
-            data,
+            data: elf.data(),
             offset,
-            len,
+            num,
             _maker: PhantomData,
         }))
     }
-    pub fn len(&self) -> usize {
-        self.len
-    }
-    pub fn get(&self, index: usize) -> Option<Result<Program<'a, T>, ParseError>> {
-        if index >= self.len {
-            return None;
-        }
-        let offset = self.offset + index * core::mem::size_of::<ProgramHeader<T>>();
-        Some(Program::parse(self.data, offset))
-    }
-    pub fn iter(&self) -> impl Iterator<Item = Result<Program<'a, T>, ParseError>> + 'a {
-        let data = self.data;
-        let offset = self.offset;
-        let len = self.len;
-        let mut index = 0usize;
-        core::iter::from_fn(move || {
-            if index >= len {
-                return None;
-            }
-            let offset = offset + index * core::mem::size_of::<ProgramHeader<T>>();
-            let ans = Program::parse(data, offset);
-            index += 1;
-            Some(ans)
-        })
+    pub fn num(&self) -> u16 {
+        self.num
     }
 }
 
-pub struct Program<'a, T: Interpreter> {
+pub struct Program<'a, T: Context> {
     pheader: &'a ProgramHeader<T>,
     content: &'a [u8],
 }
 
-impl<'a, T: Interpreter> Program<'a, T> {
-    pub(crate) fn parse(data: &'a [u8], offset: usize) -> Result<Self, ParseError> {
-        use ParseError::*;
+impl<'a, T: Context> Program<'a, T> {
+    pub fn parse(programs: Programs<'a, T>, index: u16) -> Option<Result<Self, ParseProgramError>> {
+        use ParseProgramError::*;
         use ProgramType::*;
-        let pheader: &'a ProgramHeader<T> = read(data, offset).ok_or(BrokenHeader)?;
-        let typa = pheader.checked_type().ok_or(BadProperty)?;
-        match typa {
-            Null => Ok(Program {
-                pheader,
-                content: &[],
-            }),
-            _ => {
-                let content_offset = as_offset::<T>(pheader.offset()).ok_or(BrokenBody)?;
-                let content_size = as_offset::<T>(pheader.filesz()).ok_or(BrokenBody)?;
-                let content = read_n::<u8>(data, content_offset, content_size).ok_or(BrokenBody)?;
-                Ok(Program { pheader, content })
+        if index >= programs.num {
+            return None;
+        }
+        let offset = programs.offset + index as usize * core::mem::size_of::<ProgramHeader<T>>();
+        fn helper<'a, T: Context>(
+            programs: Programs<'a, T>,
+            offset: usize,
+        ) -> Result<Program<'a, T>, ParseProgramError> {
+            let pheader: &'a ProgramHeader<T> = read(programs.data, offset).ok_or(BadHeader)?;
+            let typa = pheader.checked_type().ok_or(BadPropertyType)?;
+            match typa {
+                Null => Ok(Program {
+                    pheader,
+                    content: &[],
+                }),
+                _ => {
+                    let content_offset = as_offset::<T>(pheader.offset()).ok_or(BadContent)?;
+                    let content_size = as_offset::<T>(pheader.filesz()).ok_or(BadContent)?;
+                    let content = read_n::<u8>(programs.data, content_offset, content_size)
+                        .ok_or(BadContent)?;
+                    Ok(Program { pheader, content })
+                }
             }
         }
+        Some(helper(programs, offset))
     }
     pub fn header(&self) -> &'a ProgramHeader<T> {
         self.pheader
@@ -95,19 +95,19 @@ impl<'a, T: Interpreter> Program<'a, T> {
 
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct ProgramHeader<T: Interpreter> {
-    pub typa: U32,
+pub struct ProgramHeader<T: Context> {
+    pub typa: PropU32,
     pub flags64: T::PropU32If64,
-    pub offset: Usize<T>,
-    pub vaddr: Usize<T>,
-    pub paddr: Usize<T>,
-    pub filesz: Usize<T>,
-    pub memsz: Usize<T>,
+    pub offset: T::PropUsize,
+    pub vaddr: T::PropUsize,
+    pub paddr: T::PropUsize,
+    pub filesz: T::PropUsize,
+    pub memsz: T::PropUsize,
     pub flags32: T::PropU32If32,
-    pub align: Usize<T>,
+    pub align: T::PropUsize,
 }
 
-impl<T: Interpreter> ProgramHeader<T> {
+impl<T: Context> ProgramHeader<T> {
     pub fn checked_type(&self) -> Option<ProgramType> {
         ProgramType::try_from(T::interpret(self.typa)).ok()
     }
@@ -120,27 +120,27 @@ impl<T: Interpreter> ProgramHeader<T> {
     pub fn flags(&self) -> ProgramFlags {
         T::interpret((self.flags32, self.flags64)).into()
     }
-    pub fn offset(&self) -> Integer<T> {
+    pub fn offset(&self) -> T::Integer {
         T::interpret(self.offset)
     }
-    pub fn vaddr(&self) -> Integer<T> {
+    pub fn vaddr(&self) -> T::Integer {
         T::interpret(self.vaddr)
     }
-    pub fn paddr(&self) -> Integer<T> {
+    pub fn paddr(&self) -> T::Integer {
         T::interpret(self.paddr)
     }
-    pub fn filesz(&self) -> Integer<T> {
+    pub fn filesz(&self) -> T::Integer {
         T::interpret(self.filesz)
     }
-    pub fn memsz(&self) -> Integer<T> {
+    pub fn memsz(&self) -> T::Integer {
         T::interpret(self.memsz)
     }
-    pub fn align(&self) -> Integer<T> {
+    pub fn align(&self) -> T::Integer {
         T::interpret(self.align)
     }
 }
 
-unsafe impl<T: Interpreter> Pod for ProgramHeader<T> {}
+unsafe impl<T: Context> Pod for ProgramHeader<T> {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProgramType {

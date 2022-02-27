@@ -1,6 +1,14 @@
 use crate::utils::*;
-use crate::ParseError;
 use crate::{Class, Data, Version};
+
+#[derive(Debug, Clone)]
+pub enum ParseIdentError {
+    BadHeader,
+    BadPropertyMagic,
+    BadPropertyClass,
+    BadPropertyData,
+    BadPropertyVersion,
+}
 
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -15,15 +23,15 @@ pub struct Ident {
 }
 
 impl Ident {
-    pub fn parse(data: &[u8]) -> Result<&Self, ParseError> {
-        use ParseError::*;
-        let ident: &Ident = read(data, 0).ok_or(BrokenHeader)?;
+    pub fn parse(data: &[u8]) -> Result<&Self, ParseIdentError> {
+        use ParseIdentError::*;
+        let ident: &Ident = read(data, 0).ok_or(BadHeader)?;
         if ident.magic != [0x7F, b'E', b'L', b'F'] {
-            return Err(BadProperty);
+            return Err(BadPropertyMagic);
         }
-        let _class = ident.checked_class().ok_or(BadProperty)?;
-        let _data = ident.checked_data().ok_or(BadProperty)?;
-        let _version = ident.checked_version().ok_or(BadProperty)?;
+        let _class = ident.checked_class().ok_or(BadPropertyClass)?;
+        let _data = ident.checked_data().ok_or(BadPropertyData)?;
+        let _version = ident.checked_version().ok_or(BadPropertyVersion)?;
         Ok(unsafe { &*(data.as_ptr() as *const Ident) })
     }
     pub fn magic(&self) -> [u8; 4] {

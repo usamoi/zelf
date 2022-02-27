@@ -1,13 +1,23 @@
+use crate::context::*;
+use crate::context::{PropU16, PropU32};
 use crate::ident::*;
-use crate::interpret::*;
-use crate::program::*;
-use crate::section::*;
-use crate::strtab::*;
 use crate::utils::*;
-use crate::ParseError;
-use crate::{Class, Data, Integer, Usize, Version, U16, U32};
+use crate::{Class, Data, Version};
 
 #[derive(Debug, Clone)]
+pub enum ParseElfsError {
+    BadIdent(ParseIdentError),
+    BadElf(ParseElfError),
+}
+
+#[derive(Debug, Clone)]
+pub enum ParseElfError {
+    BadHeader,
+    BadPropertyType,
+    BadPropertyEhsize,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum Elfs<'a> {
     Little32(Elf<'a, Little32>),
     Little64(Elf<'a, Little64>),
@@ -16,46 +26,37 @@ pub enum Elfs<'a> {
 }
 
 impl<'a> Elfs<'a> {
-    pub fn parse(data: &'a [u8]) -> Result<Self, ParseError> {
-        use {Class::*, Data::*, Version::*};
-        let ident = Ident::parse(data)?;
+    pub fn parse(data: &'a [u8]) -> Result<Self, ParseElfsError> {
+        use {Class::*, Data::*, ParseElfsError::*, Version::*};
+        let ident = Ident::parse(data).map_err(BadIdent)?;
         let elf = match (ident.class(), ident.data(), ident.version()) {
-            (Class32, Little, One) => Elfs::Little32(Elf::<Little32>::parse(data)?),
-            (Class32, Big, One) => Elfs::Big32(Elf::<Big32>::parse(data)?),
-            (Class64, Little, One) => Elfs::Little64(Elf::<Little64>::parse(data)?),
-            (Class64, Big, One) => Elfs::Big64(Elf::<Big64>::parse(data)?),
+            (Class32, Little, One) => Elfs::Little32(Elf::<Little32>::parse(data).map_err(BadElf)?),
+            (Class32, Big, One) => Elfs::Big32(Elf::<Big32>::parse(data).map_err(BadElf)?),
+            (Class64, Little, One) => Elfs::Little64(Elf::<Little64>::parse(data).map_err(BadElf)?),
+            (Class64, Big, One) => Elfs::Big64(Elf::<Big64>::parse(data).map_err(BadElf)?),
         };
         Ok(elf)
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Elf<'a, T: Interpreter> {
+#[derive(Debug, Clone, Copy)]
+pub struct Elf<'a, T: Context> {
     data: &'a [u8],
     header: &'a ElfHeader<T>,
-    programs: Option<Programs<'a, T>>,
-    sections: Option<Sections<'a, T>>,
-    shstrtab: Option<Strtab<'a>>,
 }
 
-impl<'a, T: Interpreter> Elf<'a, T> {
+impl<'a, T: Context> Elf<'a, T> {
     /// This function does not check if its identication matches the context.
-    pub fn parse(data: &'a [u8]) -> Result<Self, ParseError> {
-        use ParseError::*;
-        let eheader: &ElfHeader<T> = read(data, 0).ok_or(BrokenHeader)?;
-        let _type = eheader.checked_type().ok_or(BadProperty)?;
+    pub fn parse(data: &'a [u8]) -> Result<Self, ParseElfError> {
+        use ParseElfError::*;
+        let eheader: &ElfHeader<T> = read(data, 0).ok_or(BadHeader)?;
+        let _type = eheader.checked_type().ok_or(BadPropertyType)?;
         if core::mem::size_of::<ElfHeader<T>>() != eheader.ehsize() as usize {
-            return Err(BrokenHeader);
+            return Err(BadPropertyEhsize);
         }
-        let programs = Programs::parse(data, eheader)?;
-        let sections = Sections::parse(data, eheader)?;
-        let shstrtab = check_shstrtab(sections.clone(), eheader)?;
         Ok(Elf {
             data,
             header: eheader,
-            programs,
-            sections,
-            shstrtab,
         })
     }
     pub fn data(&self) -> &'a [u8] {
@@ -64,37 +65,28 @@ impl<'a, T: Interpreter> Elf<'a, T> {
     pub fn header(&self) -> &'a ElfHeader<T> {
         self.header
     }
-    pub fn sections(&self) -> Option<Sections<'a, T>> {
-        self.sections.clone()
-    }
-    pub fn programs(&self) -> Option<Programs<'a, T>> {
-        self.programs.clone()
-    }
-    pub fn shstrtab(&self) -> Option<Strtab<'a>> {
-        self.shstrtab.clone()
-    }
 }
 
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct ElfHeader<T: Interpreter> {
+pub struct ElfHeader<T: Context> {
     pub ident: Ident,
-    pub typa: U16,
-    pub machine: U16,
-    pub version: U32,
-    pub entry: Usize<T>,
-    pub phoff: Usize<T>,
-    pub shoff: Usize<T>,
-    pub flags: U32,
-    pub ehsize: U16,
-    pub phentsize: U16,
-    pub phnum: U16,
-    pub shentsize: U16,
-    pub shnum: U16,
-    pub shstrndx: U16,
+    pub typa: PropU16,
+    pub machine: PropU16,
+    pub version: PropU32,
+    pub entry: T::PropUsize,
+    pub phoff: T::PropUsize,
+    pub shoff: T::PropUsize,
+    pub flags: PropU32,
+    pub ehsize: PropU16,
+    pub phentsize: PropU16,
+    pub phnum: PropU16,
+    pub shentsize: PropU16,
+    pub shnum: PropU16,
+    pub shstrndx: PropU16,
 }
 
-impl<T: Interpreter> ElfHeader<T> {
+impl<T: Context> ElfHeader<T> {
     /// Identification.
     pub fn ident(&self) -> &Ident {
         &self.ident
@@ -120,15 +112,15 @@ impl<T: Interpreter> ElfHeader<T> {
         T::interpret(self.version)
     }
     /// Entry point address.
-    pub fn entry(&self) -> Integer<T> {
+    pub fn entry(&self) -> T::Integer {
         T::interpret(self.entry)
     }
     /// Program header table file offset.
-    pub fn phoff(&self) -> Integer<T> {
+    pub fn phoff(&self) -> T::Integer {
         T::interpret(self.phoff)
     }
     /// Section header table file offset.
-    pub fn shoff(&self) -> Integer<T> {
+    pub fn shoff(&self) -> T::Integer {
         T::interpret(self.shoff)
     }
     /// Flags.
@@ -161,7 +153,7 @@ impl<T: Interpreter> ElfHeader<T> {
     }
 }
 
-unsafe impl<T: Interpreter> Pod for ElfHeader<T> {}
+unsafe impl<T: Context> Pod for ElfHeader<T> {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ElfType {
@@ -568,24 +560,3 @@ pub const ELF_MACHINE_MOXIE: u16 = 223;
 pub const ELF_MACHINE_AMDGPU: u16 = 224;
 /// RISC-V.
 pub const ELF_MACHINE_RISCV: u16 = 243;
-
-fn check_shstrtab<'a, T: Interpreter>(
-    sections: Option<Sections<'a, T>>,
-    eheader: &'a ElfHeader<T>,
-) -> Result<Option<Strtab<'a>>, ParseError> {
-    use ParseError::*;
-    let shstrndx = match eheader.shstrndx() {
-        SECTION_INDEX_UNDEF => return Ok(None),
-        x => x,
-    };
-    let sections = match sections {
-        None => return Ok(None),
-        Some(x) => x,
-    };
-    let section = sections.get(shstrndx as usize).ok_or(BadProperty)??;
-    if section.header().typa() != SectionType::Strtab {
-        return Err(BadProperty);
-    }
-    let shstrtab = Strtab::parse(section.content()).map_err(|_| BadProperty)?;
-    Ok(Some(shstrtab))
-}

@@ -1,17 +1,21 @@
-use crate::interpret::*;
+use crate::context::*;
 use crate::utils::{read_s, Pod};
-use crate::{Integer, ParseError, Usize};
+
+#[derive(Debug, Clone)]
+pub enum ParseRelError {
+    BadArray,
+}
 
 /// Rel section.
-#[derive(Debug, Clone)]
-pub struct Rel<'a, T: Interpreter> {
+#[derive(Debug, Clone, Copy)]
+pub struct Rel<'a, T: Context> {
     entries: &'a [RelEntry<T>],
 }
 
-impl<'a, T: Interpreter> Rel<'a, T> {
-    pub fn parse(content: &'a [u8]) -> Result<Self, ParseError> {
-        use ParseError::*;
-        let entries = read_s(content).ok_or(BrokenBody)?;
+impl<'a, T: Context> Rel<'a, T> {
+    pub fn parse(content: &'a [u8]) -> Result<Self, ParseRelError> {
+        use ParseRelError::*;
+        let entries = read_s(content).ok_or(BadArray)?;
         Ok(Self { entries })
     }
     pub fn entries(&self) -> &'a [RelEntry<T>] {
@@ -21,18 +25,18 @@ impl<'a, T: Interpreter> Rel<'a, T> {
 
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct RelEntry<T: Interpreter> {
-    pub offset: Usize<T>,
-    pub info: Usize<T>,
+pub struct RelEntry<T: Context> {
+    pub offset: T::PropUsize,
+    pub info: T::PropUsize,
 }
 
-impl<T: Interpreter> RelEntry<T> {
-    pub fn offset(&self) -> Integer<T> {
+impl<T: Context> RelEntry<T> {
+    pub fn offset(&self) -> T::Integer {
         T::interpret(self.offset)
     }
-    pub fn info(&self) -> Integer<T> {
+    pub fn info(&self) -> T::Integer {
         T::interpret(self.info)
     }
 }
 
-unsafe impl<T: Interpreter> Pod for RelEntry<T> {}
+unsafe impl<T: Context> Pod for RelEntry<T> {}

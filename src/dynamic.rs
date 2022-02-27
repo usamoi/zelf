@@ -1,20 +1,24 @@
-use crate::interpret::*;
+use crate::context::*;
 use crate::utils::{as_offset, read_s, Pod};
-use crate::ParseError;
-use crate::{Integer, Usize};
+
+#[derive(Debug, Clone)]
+pub enum ParseDynamicError {
+    BadArray,
+    BadPropertyTag,
+}
 
 /// Dynamic section/program.
-#[derive(Debug, Clone)]
-pub struct Dynamic<'a, T: Interpreter> {
+#[derive(Debug, Clone, Copy)]
+pub struct Dynamic<'a, T: Context> {
     entries: &'a [DynamicEntry<T>],
 }
 
-impl<'a, T: Interpreter> Dynamic<'a, T> {
-    pub fn parse(content: &'a [u8]) -> Result<Self, ParseError> {
-        use ParseError::*;
-        let entries: &[DynamicEntry<T>] = read_s(content).ok_or(BrokenBody)?;
+impl<'a, T: Context> Dynamic<'a, T> {
+    pub fn parse(content: &'a [u8]) -> Result<Self, ParseDynamicError> {
+        use ParseDynamicError::*;
+        let entries: &[DynamicEntry<T>] = read_s(content).ok_or(BadArray)?;
         for entry in entries {
-            let _tag = entry.checked_tag().ok_or(BadProperty)?;
+            let _tag = entry.checked_tag().ok_or(BadPropertyTag)?;
         }
         Ok(Self { entries })
     }
@@ -25,12 +29,12 @@ impl<'a, T: Interpreter> Dynamic<'a, T> {
 
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct DynamicEntry<T: Interpreter> {
-    pub tag: Usize<T>,
-    pub un: Usize<T>,
+pub struct DynamicEntry<T: Context> {
+    pub tag: T::PropUsize,
+    pub un: T::PropUsize,
 }
 
-impl<T: Interpreter> DynamicEntry<T> {
+impl<T: Context> DynamicEntry<T> {
     pub fn checked_tag(&self) -> Option<DynamicTag> {
         let value = as_offset::<T>(T::interpret(self.tag))?;
         TryInto::<u32>::try_into(value).ok()?.try_into().ok()
@@ -41,12 +45,12 @@ impl<T: Interpreter> DynamicEntry<T> {
     pub fn tag(&self) -> DynamicTag {
         self.checked_tag().unwrap()
     }
-    pub fn un(&self) -> Integer<T> {
+    pub fn un(&self) -> T::Integer {
         T::interpret(self.un)
     }
 }
 
-unsafe impl<T: Interpreter> Pod for DynamicEntry<T> {}
+unsafe impl<T: Context> Pod for DynamicEntry<T> {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DynamicTag {

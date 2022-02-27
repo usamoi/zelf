@@ -1,17 +1,22 @@
-use crate::{utils::check_string, ParseError};
+#[derive(Debug, Clone)]
+pub enum ParseInterpError {
+    BadString,
+}
 
 /// Interp program.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Interp<'a> {
     path: &'a [u8],
 }
 
 impl<'a> Interp<'a> {
-    pub fn parse(content: &'a [u8]) -> Result<Self, ParseError> {
-        use ParseError::*;
+    pub fn parse(content: &'a [u8]) -> Result<Self, ParseInterpError> {
+        use ParseInterpError::*;
         match content {
             [path @ .., 0] => {
-                check_string(path)?;
+                if path.iter().any(|c| *c == 0) {
+                    return Err(BadString);
+                }
                 Ok(Interp { path })
             }
             _ => Err(BadString),
