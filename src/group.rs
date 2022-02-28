@@ -5,8 +5,8 @@ use core::marker::PhantomData;
 
 #[derive(Debug, Clone)]
 pub enum ParseGroupError {
-    BadHeader,
-    BadArray,
+    BrokenHeader,
+    BrokenEntry,
 }
 
 /// Group section.
@@ -20,9 +20,9 @@ impl<'a, T: Context> Group<'a, T> {
     pub fn parse(content: &'a [u8]) -> Result<Self, ParseGroupError> {
         use ParseGroupError::*;
         let mut offset = 0usize;
-        let header = read(content, offset).ok_or(BadHeader)?;
+        let header = read(content, offset).ok_or(BrokenHeader)?;
         offset += core::mem::size_of::<GroupHeader<T>>();
-        let entries = read_s::<GroupEntry<T>>(&content[offset..]).ok_or(BadArray)?;
+        let entries = read_s::<GroupEntry<T>>(&content[offset..]).ok_or(BrokenEntry)?;
         Ok(Self { header, entries })
     }
     pub fn header(&self) -> &'a GroupHeader<T> {

@@ -2,7 +2,7 @@ use crate::utils::terminate;
 
 #[derive(Debug, Clone)]
 pub enum ParseInterpError {
-    BadPath,
+    BadStringPath,
 }
 
 /// Interp program.
@@ -14,7 +14,7 @@ pub struct Interp<'a> {
 impl<'a> Interp<'a> {
     pub fn parse(content: &'a [u8]) -> Result<Self, ParseInterpError> {
         use ParseInterpError::*;
-        let path = terminate(content).ok_or(BadPath)?;
+        let path = terminate(content).ok_or(BadStringPath)?;
         Ok(Interp { path })
     }
     pub fn path(&self) -> &'a [u8] {

@@ -3,7 +3,7 @@ use crate::utils::{read_s, Pod};
 
 #[derive(Debug, Clone)]
 pub enum ParseRelaError {
-    BadArray,
+    BrokenEntry,
 }
 
 /// Rela section.
@@ -15,7 +15,7 @@ pub struct Rela<'a, T: Context> {
 impl<'a, T: Context> Rela<'a, T> {
     pub fn parse(content: &'a [u8]) -> Result<Self, ParseRelaError> {
         use ParseRelaError::*;
-        let entries = read_s(content).ok_or(BadArray)?;
+        let entries = read_s(content).ok_or(BrokenEntry)?;
         Ok(Self { entries })
     }
     pub fn entries(&self) -> &'a [RelaEntry<T>] {

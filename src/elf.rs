@@ -5,56 +5,60 @@ use crate::utils::*;
 use crate::{Class, Data, Version};
 
 #[derive(Debug, Clone)]
-pub enum ParseElfsError {
-    BadIdent(ParseIdentError),
-    BadElf(ParseElfError),
+pub enum ParseElfError {
+    FromIdent(ParseIdentError),
+    FromVariant(ParseVariantError),
 }
 
 #[derive(Debug, Clone)]
-pub enum ParseElfError {
-    BadHeader,
+pub enum ParseVariantError {
+    BrokenHeader,
     BadPropertyType,
     BadPropertyEhsize,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum Elfs<'a> {
-    Little32(Elf<'a, Little32>),
-    Little64(Elf<'a, Little64>),
-    Big32(Elf<'a, Big32>),
-    Big64(Elf<'a, Big64>),
+pub enum Elf<'a> {
+    Little32(Variant<'a, Little32>),
+    Little64(Variant<'a, Little64>),
+    Big32(Variant<'a, Big32>),
+    Big64(Variant<'a, Big64>),
 }
 
-impl<'a> Elfs<'a> {
-    pub fn parse(data: &'a [u8]) -> Result<Self, ParseElfsError> {
-        use {Class::*, Data::*, ParseElfsError::*, Version::*};
-        let ident = Ident::parse(data).map_err(BadIdent)?;
+impl<'a> Elf<'a> {
+    pub fn parse(data: &'a [u8]) -> Result<Self, ParseElfError> {
+        use {Class::*, Data::*, ParseElfError::*, Version::*};
+        let ident = Ident::parse(data).map_err(FromIdent)?;
         let elf = match (ident.class(), ident.data(), ident.version()) {
-            (Class32, Little, One) => Elfs::Little32(Elf::<Little32>::parse(data).map_err(BadElf)?),
-            (Class32, Big, One) => Elfs::Big32(Elf::<Big32>::parse(data).map_err(BadElf)?),
-            (Class64, Little, One) => Elfs::Little64(Elf::<Little64>::parse(data).map_err(BadElf)?),
-            (Class64, Big, One) => Elfs::Big64(Elf::<Big64>::parse(data).map_err(BadElf)?),
+            (Class32, Little, One) => {
+                Elf::Little32(Variant::<Little32>::parse(data).map_err(FromVariant)?)
+            }
+            (Class32, Big, One) => Elf::Big32(Variant::<Big32>::parse(data).map_err(FromVariant)?),
+            (Class64, Little, One) => {
+                Elf::Little64(Variant::<Little64>::parse(data).map_err(FromVariant)?)
+            }
+            (Class64, Big, One) => Elf::Big64(Variant::<Big64>::parse(data).map_err(FromVariant)?),
         };
         Ok(elf)
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Elf<'a, T: Context> {
+pub struct Variant<'a, T: Context> {
     data: &'a [u8],
     header: &'a ElfHeader<T>,
 }
 
-impl<'a, T: Context> Elf<'a, T> {
+impl<'a, T: Context> Variant<'a, T> {
     /// This function does not check if its identication matches the context.
-    pub fn parse(data: &'a [u8]) -> Result<Self, ParseElfError> {
-        use ParseElfError::*;
-        let eheader: &ElfHeader<T> = read(data, 0).ok_or(BadHeader)?;
+    pub fn parse(data: &'a [u8]) -> Result<Self, ParseVariantError> {
+        use ParseVariantError::*;
+        let eheader: &ElfHeader<T> = read(data, 0).ok_or(BrokenHeader)?;
         let _type = eheader.checked_type().ok_or(BadPropertyType)?;
         if core::mem::size_of::<ElfHeader<T>>() != eheader.ehsize() as usize {
             return Err(BadPropertyEhsize);
         }
-        Ok(Elf {
+        Ok(Variant {
             data,
             header: eheader,
         })
@@ -87,67 +91,51 @@ pub struct ElfHeader<T: Context> {
 }
 
 impl<T: Context> ElfHeader<T> {
-    /// Identification.
     pub fn ident(&self) -> &Ident {
         &self.ident
     }
-    /// Object file type.
     pub fn checked_type(&self) -> Option<ElfType> {
         ElfType::try_from(T::interpret(self.typa)).ok()
     }
-    /// Object file type.
-    ///
     /// # Panics
     ///
-    /// Panics if its value is invaild.
+    /// Panics if the value is invaild.
     pub fn typa(&self) -> ElfType {
         self.checked_type().unwrap()
     }
-    /// Target instruction set architecture.
     pub fn machine(&self) -> u16 {
         T::interpret(self.machine)
     }
-    /// Object file version.
     pub fn version(&self) -> u32 {
         T::interpret(self.version)
     }
-    /// Entry point address.
     pub fn entry(&self) -> T::Integer {
         T::interpret(self.entry)
     }
-    /// Program header table file offset.
     pub fn phoff(&self) -> T::Integer {
         T::interpret(self.phoff)
     }
-    /// Section header table file offset.
     pub fn shoff(&self) -> T::Integer {
         T::interpret(self.shoff)
     }
-    /// Flags.
     pub fn flags(&self) -> u32 {
         T::interpret(self.flags)
     }
-    /// ELF header size in bytes.
     pub fn ehsize(&self) -> u16 {
         T::interpret(self.ehsize)
     }
-    /// Program header table's entry size.
     pub fn phentsize(&self) -> u16 {
         T::interpret(self.phentsize)
     }
-    /// Program header table's entry count.
     pub fn phnum(&self) -> u16 {
         T::interpret(self.phnum)
     }
-    /// Section header table's entry size.
     pub fn shentsize(&self) -> u16 {
         T::interpret(self.shentsize)
     }
-    /// Section header table's entry count.
     pub fn shnum(&self) -> u16 {
         T::interpret(self.shnum)
     }
-    /// Section header string table index.
     pub fn shstrndx(&self) -> u16 {
         T::interpret(self.shstrndx)
     }

@@ -1,16 +1,18 @@
 [package]
 name = "zelf"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 authors = ["Usamoi <usamoi@outlook.com>"]
 description = "A zero-allocation ELF parser."
 license = "MIT"
 repository = "https://github.com/usamoi/zelf"
 keywords = ["elf", "parser"]
-categories = ["no_std", "parser-implementations"]
+categories = ["no-std", "parser-implementations"]
+documentation = "https://docs.rs/zelf"
 
 [dependencies]
 derive_more = "0.99.17"
 
 [dev_dependencies]
 clap = { version = "3.0.14", features = ["derive"] }
+flate2 = "1.0"

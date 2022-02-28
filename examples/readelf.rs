@@ -12,9 +12,9 @@ pub struct Args {
 }
 
 fn show(file: &str) {
-    use zelf::elf::Elfs::*;
+    use zelf::elf::Elf::*;
     let bytes = std::fs::read(file).expect("Cannot open the file.");
-    let elf = zelf::elf::Elfs::parse(&bytes).unwrap();
+    let elf = zelf::elf::Elf::parse(&bytes).unwrap();
     match elf {
         Little32(elf) => show::show(elf),
         Little64(elf) => show::show(elf),
@@ -23,9 +23,8 @@ fn show(file: &str) {
     }
 }
 
-#[allow(unused)]
 fn main() {
     let args = Args::parse();
     let file = args.file.expect("No ELF file is specified.");
-    show(file.as_str());
+    show(&file);
 }

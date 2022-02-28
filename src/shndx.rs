@@ -4,7 +4,7 @@ use core::marker::PhantomData;
 
 #[derive(Debug, Clone)]
 pub enum ParseShndxError {
-    BadArray,
+    BrokenEntry,
 }
 
 /// Symtab shndx section.
@@ -16,7 +16,7 @@ pub struct Shndx<'a, T: Context> {
 impl<'a, T: Context> Shndx<'a, T> {
     pub fn parse(content: &'a [u8]) -> Result<Self, ParseShndxError> {
         use ParseShndxError::*;
-        let entries = read_s(content).ok_or(BadArray)?;
+        let entries = read_s(content).ok_or(BrokenEntry)?;
         Ok(Self { entries })
     }
     pub fn entries(&self) -> &'a [ShndxEntry<T>] {

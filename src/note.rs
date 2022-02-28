@@ -5,9 +5,10 @@ use core::marker::PhantomData;
 
 #[derive(Debug, Clone)]
 pub enum ParseNoteError {
-    BadHeader,
-    BadName,
-    BadDescriptor,
+    BrokenHeader,
+    BrokenName,
+    BadStringName,
+    BrokenDescriptor,
 }
 
 /// Note section/program.
@@ -19,20 +20,19 @@ pub struct Note<'a> {
 }
 
 impl<'a> Note<'a> {
-    #[allow(unused_assignments)]
     pub fn parse<T: Context>(content: &'a [u8]) -> Result<Self, ParseNoteError> {
         use ParseNoteError::*;
         let mut offset = 0usize;
-        let header: &NoteHeader<T> = read(content, offset).ok_or(BadHeader)?;
+        let header: &NoteHeader<T> = read(content, offset).ok_or(BrokenHeader)?;
         offset += core::mem::size_of::<NoteHeader<T>>();
         let name: &[u8] =
-            terminate(read_n(content, offset, header.name_size() as usize).ok_or(BadName)?)
-                .ok_or(BadName)?;
+            terminate(read_n(content, offset, header.name_size() as usize).ok_or(BrokenName)?)
+                .ok_or(BadStringName)?;
         offset += header.name_size() as usize;
         offset = align(offset, core::mem::align_of::<T::Integer>());
         let descriptor = read_n::<u8>(content, offset, header.descriptor_size() as usize)
-            .ok_or(BadDescriptor)?;
-        offset += header.descriptor_size() as usize;
+            .ok_or(BrokenDescriptor)?;
+        // offset += header.descriptor_size() as usize;
         Ok(Self {
             typa: header.typa(),
             name,

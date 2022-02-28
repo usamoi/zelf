@@ -2,7 +2,7 @@ use crate::utils::terminate;
 
 #[derive(Debug, Clone)]
 pub enum ParseStrtabError {
-    BadString,
+    Broken,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -15,7 +15,7 @@ impl<'a> Strtab<'a> {
         use ParseStrtabError::*;
         match content {
             [.., 0] | [] => Ok(Self { strings: content }),
-            [.., _] => Err(BadString),
+            [.., _] => Err(Broken),
         }
     }
     pub fn find(&self, name: usize) -> Option<&'a [u8]> {

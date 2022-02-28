@@ -4,7 +4,7 @@ use crate::utils::{read_s, Pod};
 
 #[derive(Debug, Clone)]
 pub enum ParseSymtabError {
-    BadArray,
+    BrokenEntry,
 }
 
 /// Symtab section.
@@ -16,7 +16,7 @@ pub struct Symtab<'a, T: Context> {
 impl<'a, T: Context> Symtab<'a, T> {
     pub fn parse(content: &'a [u8]) -> Result<Self, ParseSymtabError> {
         use ParseSymtabError::*;
-        let entries = read_s(content).ok_or(BadArray)?;
+        let entries = read_s(content).ok_or(BrokenEntry)?;
         Ok(Self { entries })
     }
     pub fn entries(&self) -> &'a [SymtabEntry<T>] {

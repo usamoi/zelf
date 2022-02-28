@@ -3,7 +3,7 @@ use crate::utils::{read_s, Pod};
 
 #[derive(Debug, Clone)]
 pub enum ParseDynamicError {
-    BadArray,
+    BrokenEntry,
 }
 
 /// Dynamic section/program.
@@ -15,7 +15,7 @@ pub struct Dynamic<'a, T: Context> {
 impl<'a, T: Context> Dynamic<'a, T> {
     pub fn parse(content: &'a [u8]) -> Result<Self, ParseDynamicError> {
         use ParseDynamicError::*;
-        let entries: &[DynamicEntry<T>] = read_s(content).ok_or(BadArray)?;
+        let entries: &[DynamicEntry<T>] = read_s(content).ok_or(BrokenEntry)?;
         Ok(Self { entries })
     }
     pub fn entries(&self) -> &'a [DynamicEntry<T>] {

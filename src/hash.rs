@@ -5,9 +5,9 @@ use core::marker::PhantomData;
 
 #[derive(Debug, Clone)]
 pub enum ParseHashError {
-    BadHeader,
-    BadBuckets,
-    BadChains,
+    BrokenHeader,
+    BrokenBuckets,
+    BrokenChains,
 }
 
 /// Hash section.
@@ -18,17 +18,16 @@ pub struct Hash<'a, T: Context> {
 }
 
 impl<'a, T: Context> Hash<'a, T> {
-    #[allow(unused_assignments)]
     pub fn parse(content: &'a [u8]) -> Result<Self, ParseHashError> {
         use ParseHashError::*;
         let mut offset = 0usize;
-        let header: &HashHeader<T> = read(content, offset).ok_or(BadHeader)?;
+        let header: &HashHeader<T> = read(content, offset).ok_or(BrokenHeader)?;
         let buckets: &[HashBucketEntry<T>] =
-            read_n(content, offset, header.nbuckets() as usize).ok_or(BadBuckets)?;
+            read_n(content, offset, header.nbuckets() as usize).ok_or(BrokenBuckets)?;
         offset += core::mem::size_of::<HashBucketEntry<T>>() * header.nbuckets() as usize;
         let chains: &[HashChainEntry<T>] =
-            read_n(content, offset, header.nchains() as usize).ok_or(BadChains)?;
-        offset += core::mem::size_of::<HashChainEntry<T>>() * header.nchains() as usize;
+            read_n(content, offset, header.nchains() as usize).ok_or(BrokenChains)?;
+        // offset += core::mem::size_of::<HashChainEntry<T>>() * header.nchains() as usize;
         Ok(Self { buckets, chains })
     }
     pub fn buckets(&self) -> &'a [HashBucketEntry<T>] {
@@ -89,16 +88,16 @@ impl<T: Context> HashChainEntry<T> {
 unsafe impl<T: Context> Pod for HashChainEntry<T> {}
 
 /// ELF hash function.
-#[allow(arithmetic_overflow)]
 pub fn hash(name: &[u8]) -> u32 {
-    let mut r = 0u32;
-    for x in name.iter().copied() {
-        r = (r << 4) + x as u32;
-        let g = r & 0xf0000000;
-        if g != 0 {
+    use core::num::Wrapping;
+    let mut r = Wrapping(0u32);
+    for x in name.iter().copied().map(|x| Wrapping(x as u32)) {
+        r = (r << 4) + x as Wrapping<u32>;
+        let g = r & Wrapping(0xf0000000u32);
+        if g != Wrapping(0u32) {
             r ^= g >> 24;
         }
         r &= !g;
     }
-    r
+    r.0
 }

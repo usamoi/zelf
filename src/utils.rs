@@ -23,7 +23,11 @@ pub fn as_offset<T: Context>(x: T::Integer) -> Option<usize> {
     y.try_into().ok()
 }
 
-#[allow(clippy::missing_safety_doc)]
+/// A marker trait indicating that a type is "Plain Old Data".
+///
+/// # Safety
+///
+/// A type can be "Plain Old Data" if it is C representation.
 pub unsafe trait Pod: Sized {}
 
 unsafe impl Pod for u8 {}

@@ -3,9 +3,9 @@ use crate::utils::*;
 
 #[derive(Debug, Clone)]
 pub enum ParseCompressionError {
-    BadHeader,
+    BrokenHeader,
     BadPropertyType,
-    BadContent,
+    BrokenContent,
 }
 
 /// Compressed section.
@@ -19,10 +19,10 @@ impl<'a, T: Context> Compression<'a, T> {
     pub fn parse(content: &'a [u8]) -> Result<Self, ParseCompressionError> {
         use ParseCompressionError::*;
         let mut offset = 0usize;
-        let header: &CompressionHeader<T> = read(content, offset).ok_or(BadHeader)?;
+        let header: &CompressionHeader<T> = read(content, offset).ok_or(BrokenHeader)?;
         let _type = header.checked_type().ok_or(BadPropertyType)?;
         offset += core::mem::size_of::<CompressionHeader<T>>();
-        let content = read_s(&content[offset..]).ok_or(BadContent)?;
+        let content = read_s(&content[offset..]).ok_or(BrokenContent)?;
         Ok(Self { header, content })
     }
     pub fn header(&self) -> &'a CompressionHeader<T> {

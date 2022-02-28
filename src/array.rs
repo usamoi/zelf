@@ -3,7 +3,7 @@ use crate::utils::*;
 
 #[derive(Debug, Clone)]
 pub enum ParseArrayError {
-    BadArray,
+    BrokenEntry,
 }
 
 /// Array section.
@@ -15,7 +15,7 @@ pub struct Array<'a, T: Context> {
 impl<'a, T: Context> Array<'a, T> {
     pub fn parse(content: &'a [u8]) -> Result<Self, ParseArrayError> {
         use ParseArrayError::*;
-        let entries = read_s(content).ok_or(BadArray)?;
+        let entries = read_s(content).ok_or(BrokenEntry)?;
         Ok(Self { entries })
     }
     pub fn entries(&self) -> &'a [ArrayEntry<T>] {

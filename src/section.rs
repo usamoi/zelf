@@ -1,34 +1,31 @@
 use crate::context::PropU32;
 use crate::context::*;
-use crate::elf::Elf;
-use crate::strtab::Strtab;
+use crate::elf::Variant;
+use crate::strtab::{ParseStrtabError, Strtab};
 use crate::utils::{as_offset, read, read_n, Pod};
 use core::marker::PhantomData;
 use core::ops::RangeInclusive;
 
 #[derive(Debug, Clone)]
 pub enum ParseSectionsError {
+    BrokenHeaders,
     BadPropertyShentsize,
-    BadSectionHeaders,
-    BadSectionZero,
     BadPropertyShstrndx,
     BadPropertyShnum,
-    BadArray,
 }
 
 #[derive(Debug, Clone)]
 pub enum ParseSectionError {
-    BadHeader,
     BadPropertyType,
-    BadContent,
+    BrokenContent,
 }
 
 #[derive(Debug, Clone)]
 pub enum ParseShstrtabError {
     BadPropertyShstrndx,
-    BadSection,
+    FromSection(ParseSectionError),
     BadPropertyType,
-    BadStrtab,
+    FromStrtab(ParseStrtabError),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -41,10 +38,10 @@ pub struct Sections<'a, T: Context> {
 }
 
 impl<'a, T: Context> Sections<'a, T> {
-    pub fn parse(elf: Elf<'a, T>) -> Result<Option<Sections<'a, T>>, ParseSectionsError> {
+    pub fn parse(elf: Variant<'a, T>) -> Result<Option<Sections<'a, T>>, ParseSectionsError> {
         use ParseSectionsError::*;
         let data = elf.data();
-        let offset = as_offset::<T>(elf.header().shoff()).ok_or(BadSectionHeaders)?;
+        let offset = as_offset::<T>(elf.header().shoff()).ok_or(BrokenHeaders)?;
         if offset == 0 {
             return Ok(None);
         }
@@ -52,45 +49,18 @@ impl<'a, T: Context> Sections<'a, T> {
             return Err(BadPropertyShentsize);
         }
         // section zero
-        let zero = read::<SectionHeader<T>>(data, offset).ok_or(BadSectionZero)?;
-        if zero.name() != 0 {
-            return Err(BadSectionZero);
-        }
-        if zero.checked_type() != Some(SectionType::Null) {
-            return Err(BadSectionZero);
-        }
-        if zero.flags().into() != 0u32.into() {
-            return Err(BadSectionZero);
-        }
-        if as_offset::<T>(zero.addr()).ok_or(BadSectionZero)? != 0 {
-            return Err(BadSectionZero);
-        }
-        if as_offset::<T>(zero.offset()).ok_or(BadSectionZero)? != 0 {
-            return Err(BadSectionZero);
-        }
-        let num = match (
-            elf.header().shnum(),
-            as_offset::<T>(zero.size()).ok_or(BadSectionZero)?,
-        ) {
-            (x, 0) if x < *SECTION_INDEX_RESERVE.start() => x,
-            (0, x) if x as u16 >= *SECTION_INDEX_RESERVE.start() => x as u16,
+        let zero = read::<SectionHeader<T>>(data, offset).ok_or(BrokenHeaders)?;
+        let num = match (elf.header().shnum(), as_offset::<T>(zero.size())) {
+            (x @ 0..=0xfeff, Some(0)) => x,
+            (0, Some(x @ 0xff00..=0xffff)) => x as u16,
             _ => return Err(BadPropertyShnum),
         };
         let shstrndx = match (elf.header().shstrndx(), zero.link()) {
-            (x, 0) if x < *SECTION_INDEX_RESERVE.start() => x,
-            (SECTION_INDEX_XINDEX, x) if x as u16 >= *SECTION_INDEX_RESERVE.start() => x as u16,
+            (x @ 0..=0xfeff, 0) => x,
+            (SECTION_INDEX_XINDEX, x @ 0xff00..=0xffff) => x as u16,
             _ => return Err(BadPropertyShstrndx),
         };
-        if zero.info() != 0 {
-            return Err(BadSectionZero);
-        }
-        if as_offset::<T>(zero.addralign()).ok_or(BadSectionZero)? != 0 {
-            return Err(BadSectionZero);
-        }
-        if as_offset::<T>(zero.entsize()).ok_or(BadSectionZero)? != 0 {
-            return Err(BadSectionZero);
-        }
-        read_n::<SectionHeader<T>>(data, offset, num as usize).ok_or(BadSectionHeaders)?;
+        read_n::<SectionHeader<T>>(data, offset, num as usize).ok_or(BrokenHeaders)?;
         Ok(Some(Self {
             data,
             offset,
@@ -128,7 +98,7 @@ impl<'a, T: Context> Section<'a, T> {
             data: &'a [u8],
             offset: usize,
         ) -> Result<Section<'a, T>, ParseSectionError> {
-            let sheader: &'a SectionHeader<T> = read(data, offset).ok_or(BadHeader)?;
+            let sheader: &'a SectionHeader<T> = read(data, offset).unwrap();
             let typa =
                 SectionType::try_from(T::interpret(sheader.typa)).map_err(|_| BadPropertyType)?;
             match typa {
@@ -137,15 +107,15 @@ impl<'a, T: Context> Section<'a, T> {
                     content: &[],
                 }),
                 Nobits => {
-                    let content_offset = as_offset::<T>(sheader.offset()).ok_or(BadContent)?;
-                    let content = read_n::<u8>(data, content_offset, 0).ok_or(BadContent)?;
+                    let content_offset = as_offset::<T>(sheader.offset()).ok_or(BrokenContent)?;
+                    let content = read_n::<u8>(data, content_offset, 0).ok_or(BrokenContent)?;
                     Ok(Section { sheader, content })
                 }
                 _ => {
-                    let content_offset = as_offset::<T>(sheader.offset()).ok_or(BadContent)?;
-                    let content_size = as_offset::<T>(sheader.size()).ok_or(BadContent)?;
+                    let content_offset = as_offset::<T>(sheader.offset()).ok_or(BrokenContent)?;
+                    let content_size = as_offset::<T>(sheader.size()).ok_or(BrokenContent)?;
                     let content =
-                        read_n::<u8>(data, content_offset, content_size).ok_or(BadContent)?;
+                        read_n::<u8>(data, content_offset, content_size).ok_or(BrokenContent)?;
                     Ok(Section { sheader, content })
                 }
             }
@@ -176,11 +146,11 @@ impl<'a> Shstrtab<'a> {
         };
         let section = Section::parse(sections, shstrndx)
             .ok_or(BadPropertyShstrndx)?
-            .map_err(|_| BadSection)?;
+            .map_err(FromSection)?;
         if section.header().typa() != SectionType::Strtab {
             return Err(BadPropertyType);
         }
-        let shstrtab = Strtab::parse(section.content()).map_err(|_| BadStrtab)?;
+        let shstrtab = Strtab::parse(section.content()).map_err(FromStrtab)?;
         Ok(Some(Self { strtab: shstrtab }))
     }
     pub fn strtab(&self) -> Strtab<'a> {
@@ -249,7 +219,7 @@ pub const SECTION_INDEX_UNDEF: u16 = 0;
 /// The range of reserved indexes.
 pub const SECTION_INDEX_RESERVE: RangeInclusive<u16> = 0xff00..=0xffff;
 /// Processor-specific.
-pub const SECTION_INDEX_PROCESSORSPECIFIC: RangeInclusive<u16> = (0xff00)..=(0xff1f);
+pub const SECTION_INDEX_PROCESSORSPECIFIC: RangeInclusive<u16> = 0xff00..=0xff1f;
 /// Operating system-specific.
 pub const SECTION_INDEX_OSSPECIFIC: RangeInclusive<u16> = 0xff20..=0xff3f;
 /// This value specifies absolute values for the corresponding reference.

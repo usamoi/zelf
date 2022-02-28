@@ -3,7 +3,7 @@ use crate::{Class, Data, Version};
 
 #[derive(Debug, Clone)]
 pub enum ParseIdentError {
-    BadHeader,
+    BrokenHeader,
     BadPropertyMagic,
     BadPropertyClass,
     BadPropertyData,
@@ -25,7 +25,7 @@ pub struct Ident {
 impl Ident {
     pub fn parse(data: &[u8]) -> Result<&Self, ParseIdentError> {
         use ParseIdentError::*;
-        let ident: &Ident = read(data, 0).ok_or(BadHeader)?;
+        let ident: &Ident = read(data, 0).ok_or(BrokenHeader)?;
         if ident.magic != [0x7F, b'E', b'L', b'F'] {
             return Err(BadPropertyMagic);
         }
@@ -33,6 +33,9 @@ impl Ident {
         let _data = ident.checked_data().ok_or(BadPropertyData)?;
         let _version = ident.checked_version().ok_or(BadPropertyVersion)?;
         Ok(unsafe { &*(data.as_ptr() as *const Ident) })
+    }
+    pub fn as_bytes(&self) -> &[u8; 16] {
+        unsafe { core::mem::transmute(self) }
     }
     pub fn magic(&self) -> [u8; 4] {
         self.magic
@@ -42,7 +45,7 @@ impl Ident {
     }
     /// # Panics
     ///
-    /// Panics if it's not a vaild ELF class.
+    /// Panics if the value is invaild.
     pub fn class(&self) -> Class {
         self.checked_class().unwrap()
     }
@@ -51,7 +54,7 @@ impl Ident {
     }
     /// # Panics
     ///
-    /// Panics if it's not a vaild ELF data encoding.
+    /// Panics if the value is invaild.
     pub fn data(&self) -> Data {
         self.checked_data().unwrap()
     }
@@ -60,7 +63,7 @@ impl Ident {
     }
     /// # Panics
     ///
-    /// Panics if it's not a vaild ELF version.
+    /// Panics if the value is invaild.
     pub fn version(&self) -> Version {
         self.checked_version().unwrap()
     }

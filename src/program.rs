@@ -1,23 +1,19 @@
 use crate::context::PropU32;
 use crate::context::*;
-use crate::elf::Elf;
+use crate::elf::Variant;
 use crate::utils::{as_offset, read, read_n, Pod};
 use core::marker::PhantomData;
 
 #[derive(Debug, Clone)]
 pub enum ParseProgramsError {
+    BrokenHeaders,
     BadPropertyPhentsize,
-    BadProgramHeaders,
-    BadArray,
 }
 
 #[derive(Debug, Clone)]
 pub enum ParseProgramError {
-    BadHeader,
     BadPropertyType,
-    BadContent,
-    BadPhdr,
-    BadTls,
+    BrokenContent,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -29,10 +25,10 @@ pub struct Programs<'a, T: Context> {
 }
 
 impl<'a, T: Context> Programs<'a, T> {
-    pub fn parse(elf: Elf<'a, T>) -> Result<Option<Programs<'a, T>>, ParseProgramsError> {
+    pub fn parse(elf: Variant<'a, T>) -> Result<Option<Programs<'a, T>>, ParseProgramsError> {
         use ParseProgramsError::*;
         let data = elf.data();
-        let offset = as_offset::<T>(elf.header().phoff()).ok_or(BadProgramHeaders)?;
+        let offset = as_offset::<T>(elf.header().phoff()).ok_or(BrokenHeaders)?;
         if offset == 0 {
             return Ok(None);
         }
@@ -40,7 +36,7 @@ impl<'a, T: Context> Programs<'a, T> {
             return Err(BadPropertyPhentsize);
         }
         let num = elf.header().phnum();
-        read_n::<ProgramHeader<T>>(data, offset, num as usize).ok_or(BadProgramHeaders)?;
+        read_n::<ProgramHeader<T>>(data, offset, num as usize).ok_or(BrokenHeaders)?;
         Ok(Some(Self {
             data,
             offset,
@@ -70,7 +66,7 @@ impl<'a, T: Context> Program<'a, T> {
             programs: Programs<'a, T>,
             offset: usize,
         ) -> Result<Program<'a, T>, ParseProgramError> {
-            let pheader: &'a ProgramHeader<T> = read(programs.data, offset).ok_or(BadHeader)?;
+            let pheader: &'a ProgramHeader<T> = read(programs.data, offset).unwrap();
             let typa = pheader.checked_type().ok_or(BadPropertyType)?;
             if let Null = typa {
                 return Ok(Program {
@@ -78,28 +74,10 @@ impl<'a, T: Context> Program<'a, T> {
                     content: &[],
                 });
             }
-            let content_offset = as_offset::<T>(pheader.offset()).ok_or(BadContent)?;
-            let content_size = as_offset::<T>(pheader.filesz()).ok_or(BadContent)?;
+            let content_offset = as_offset::<T>(pheader.offset()).ok_or(BrokenContent)?;
+            let content_size = as_offset::<T>(pheader.filesz()).ok_or(BrokenContent)?;
             let content =
-                read_n::<u8>(programs.data, content_offset, content_size).ok_or(BadContent)?;
-            match typa {
-                Phdr => {
-                    if content_offset != programs.offset {
-                        return Err(BadPhdr);
-                    }
-                    if content_size
-                        != programs.num() as usize * core::mem::size_of::<ProgramHeader<T>>()
-                    {
-                        return Err(BadPhdr);
-                    }
-                }
-                Tls => {
-                    if pheader.flags() != ProgramFlags::READ {
-                        return Err(BadTls);
-                    }
-                }
-                _ => (),
-            }
+                read_n::<u8>(programs.data, content_offset, content_size).ok_or(BrokenContent)?;
             Ok(Program { pheader, content })
         }
         Some(helper(programs, offset))
